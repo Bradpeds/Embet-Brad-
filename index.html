@@ -663,8 +663,13 @@ function render() {
 
   ${!st.loading && !hasPicks && !st.err ? `
   <div style="text-align:center;padding:80px 0;color:var(--text2)">
+    ${(st.picks?.sportsFailed?.length || 0) > 0 ? `
+    <div style="font-size:15px;font-weight:500;color:var(--amber);margin-bottom:8px">Scan incomplete</div>
+    <div style="font-size:13px;margin-bottom:16px">${st.picks.sportsFailed.length} of ${st.picks.sportsTried} sport requests failed during the last scan (status ${st.picks.sportsFailed.map(f=>f.status).join(', ')}), so this "no plays" result may just mean those sports were never checked — not that the board is actually quiet. Check your API usage page if this keeps happening.</div>
+    ` : `
     <div style="font-size:15px;font-weight:500;color:var(--text);margin-bottom:8px">No plays found</div>
-    <div style="font-size:13px;margin-bottom:16px">No plays at or above the ${(minEdge()*100).toFixed(1)}% edge floor as of the last scan${st.picks?` (${new Date(st.picks.generatedAt).toLocaleTimeString()})`:''}. Lines move throughout the day, so this can change without you doing anything — rescan to check the current board.</div>
+    <div style="font-size:13px;margin-bottom:16px">No plays at or above the ${(minEdge()*100).toFixed(1)}% edge floor as of the last scan${st.picks?` (${new Date(st.picks.generatedAt).toLocaleTimeString()})`:''}. All ${st.picks?.sportsTried||0} sport requests succeeded — this means the board was actually checked and found quiet, not that something failed silently. Lines move throughout the day, so this can change without you doing anything — rescan to check the current board.</div>
+    `}
     <button class="btn" onclick="EL.retry()">Rescan now</button>
   </div>` : ''}
 
@@ -833,6 +838,7 @@ async function scan() {
     ].slice(0, 8);
 
     const opps = [];
+    const failedSports = []; // sports whose odds request failed for a reason other than quota — tracked so a degraded scan never looks identical to a genuinely quiet board
 
     for (const sport of sorted) {
       const url = new URL(`${OB}/sports/${sport}/odds/`);
@@ -845,6 +851,7 @@ async function scan() {
       const res = await fetch(url.toString());
       if (!res.ok) {
         if (res.status === 429) throw new Error('API quota reached for this period.');
+        failedSports.push({ sport, status: res.status });
         continue;
       }
 
@@ -996,7 +1003,9 @@ async function scan() {
       near,
       future,
       flagged,
-      total:       opps.length
+      total:        opps.length,
+      sportsTried:  sorted.length,
+      sportsFailed: failedSports
     };
 
     st.picks = picks;
