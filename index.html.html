@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>emBET</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f7f8fc;
+      --surface: #ffffff;
+      --border: rgba(0,0,0,0.09);
+      --border-md: rgba(0,0,0,0.15);
+      --text: #111827;
+      --text2: #6b7280;
+      --text3: #9ca3af;
+      --accent: #3b5bdb;
+      --accent-bg: #eef2ff;
+      --accent-border: rgba(59,91,219,0.25);
+      --green: #16a34a;
+      --green-bg: #f0fdf4;
+      --green-border: rgba(22,163,74,0.25);
+      --red: #dc2626;
+      --red-bg: #fef2f2;
+      --red-border: rgba(220,38,38,0.25);
+      --amber: #d97706;
+      --amber-bg: #fffbeb;
+      --amber-border: rgba(217,119,6,0.25);
+      --mono: 'JetBrains Mono', 'Courier New', monospace;
+      --sans: 'Inter', system-ui, sans-serif;
+      --radius: 8px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0c0e18;
+        --surface: #151824;
+        --border: rgba(255,255,255,0.07);
+        --border-md: rgba(255,255,255,0.13);
+        --text: #e8ecff;
+        --text2: #8891b2;
+        --text3: #5d6585;
+        --accent: #6c8cff;
+        --accent-bg: rgba(108,140,255,0.1);
+        --accent-border: rgba(108,140,255,0.3);
+        --green: #4ade80;
+        --green-bg: rgba(74,222,128,0.08);
+        --green-border: rgba(74,222,128,0.25);
+        --red: #f87171;
+        --red-bg: rgba(248,113,113,0.08);
+        --red-border: rgba(248,113,113,0.25);
+        --amber: #fbbf24;
+        --amber-bg: rgba(251,191,36,0.08);
+        --amber-border: rgba(251,191,36,0.25);
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 620px; margin: 0 auto; padding: 28px 16px 64px; }
+    .card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      margin-bottom: 12px;
+    }
+    .near-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 0;
+      padding: 20px 22px;
+      margin-bottom: 12px;
+    }
+    .future-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-left: 3px solid var(--amber);
+      border-radius: 0;
+      padding: 20px 22px;
+      margin-bottom: 12px;
+    }
+    .section-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 20px 0 14px;
+      font-size: 11px;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: var(--text3);
+    }
+    .section-divider::before,
+    .section-divider::after {
+      content: '';
+      flex: 1;
+      height: 0.5px;
+      background: var(--border);
+    }
+    .lbl {
+      font-size: 10px;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: var(--text2);
+      display: block;
+      margin-bottom: 4px;
+    }
+    .mono { font-family: var(--mono); }
+    .btn {
+      background: transparent;
+      border: 0.5px solid var(--border-md);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 6px 13px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: var(--sans);
+      transition: background 0.1s;
+    }
+    .btn:hover { background: var(--accent-bg); }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .b-neutral { background: var(--bg);       color: var(--text2);  border: 0.5px solid var(--border-md);      }
+    .b-info    { background: var(--accent-bg); color: var(--accent); border: 0.5px solid var(--accent-border);  }
+    .b-success { background: var(--green-bg);  color: var(--green);  border: 0.5px solid var(--green-border);   }
+    .b-danger  { background: var(--red-bg);    color: var(--red);    border: 0.5px solid var(--red-border);     }
+    .b-warning { background: var(--amber-bg);  color: var(--amber);  border: 0.5px solid var(--amber-border);   }
+    .rbtn {
+      flex: 1;
+      padding: 12px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      border: 0.5px solid var(--border-md);
+      background: var(--bg);
+      color: var(--text2);
+      font-family: var(--sans);
+    }
+    .rbtn.W { background: var(--green-bg);  color: var(--green);  border-color: var(--green-border);  font-weight: 500; }
+    .rbtn.L { background: var(--red-bg);    color: var(--red);    border-color: var(--red-border);    font-weight: 500; }
+    .rbtn.P { background: var(--amber-bg);  color: var(--amber);  border-color: var(--amber-border);  font-weight: 500; }
+    .tbl { width: 100%; border-collapse: collapse; }
+    .tbl td { padding: 8px 14px; border-bottom: 0.5px solid var(--border); vertical-align: middle; }
+    .empty-window {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: var(--text2);
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div id="app"></div>
+  <div style="text-align:center;margin-top:44px;font-size:11px;color:var(--text3);line-height:1.8">
+    emBET scans live lines across DraftKings, FanDuel, BetMGM, Caesars, and others daily.<br>
+    EV+ calculations use Pinnacle as the sharp-market reference where available, de-vigged with Shin's method (corrects for favorite-longshot bias) and filtered to a 1.5%+ modeled edge.
+  </div>
+</div>
+<script>
+let AK    = '';   // loaded from localStorage on init
+const OB  = 'https://api.the-odds-api.com/v4';
+const BKS = 'pinnacle,draftkings,fanduel,betmgm,caesars,pointsbetus,betrivers,williamhill_us';
+const START  = 'June 17, 2026';
+const FLAT   = 10;
+const H72    = 72  * 60 * 60 * 1000;   // 3 days in ms
+const H90D   = 90  * 24 * 60 * 60 * 1000; // 90 days in ms
+const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours — cached picks older than this trigger an automatic background rescan on load instead of sitting stale for the rest of the day. Raise this (or remove the auto-rescan call in init()) if you're tight on the free-tier 500/month request quota — each scan costs ~9 requests.
+const MIN_CB = 3;   // min book quotes per side before trusting a consensus fair line
+const MIN_EDGE = 0.015; // min modeled edge (1.5%) before a play is worth surfacing — below this, it's more likely de-vig noise or a stale line than a repeatable advantage
+const PRI = [
+  'baseball_mlb','basketball_nba','icehockey_nhl',
+  'americanfootball_nfl','americanfootball_ncaaf',
+  'basketball_ncaab','basketball_wnba',
+  'soccer_usa_mls','soccer_epl'
+];
+
+// Math
+const tD  = o => o > 0 ? o/100+1 : 100/Math.abs(o)+1;
+const iP  = o => 1/tD(o);
+const tA  = d => d >= 2 ? Math.round((d-1)*100) : Math.round(-100/(d-1));
+const cEV = (f,o) => f*(tD(o)-1)-(1-f);
+const cCLV = (yourLine, closeLine) => iP(closeLine) - iP(yourLine); // + = line moved your way after you bet
+
+// Shin's method de-vig for a two-outcome market (Shin 1992/1993).
+// Plain proportional de-vig (q_i / sum of q) spreads the vig evenly across
+// both sides as a share of probability, which understates favorites and
+// overstates longshots on skewed moneylines — the "favorite-longshot bias"
+// documented in the betting-market literature. Shin's model treats part of
+// the overround as a hedge against insider/sharp money and loads more of it
+// onto the longshot side instead. On near-even lines (most spreads/totals)
+// it converges to the same number as proportional de-vig; it only changes
+// the output meaningfully on lopsided moneylines, which is exactly where
+// the old method was weakest. z is solved numerically via bisection rather
+// than from a memorized closed-form constant, so there's no transcription
+// risk in the math.
+function shinProb(q1, q2) {
+  const Q = q1 + q2; // overround-inclusive sum, > 1 for any vigged market
+  const pAt = (z, qi) => z >= 1
+    ? (qi*qi) / Q
+    : (Math.sqrt(z*z + 4*(1-z)*qi*qi/Q) - z) / (2*(1-z));
+  const f = z => pAt(z, q1) + pAt(z, q2) - 1;
+  let lo = 0, hi = 0.999999, flo = f(lo);
+  if (flo <= 0 || flo * f(hi) > 0) return [q1/Q, q2/Q]; // degenerate input — fall back to plain de-vig
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2, fm = f(mid);
+    if ((flo > 0) === (fm > 0)) { lo = mid; flo = fm; } else { hi = mid; }
+  }
+  const z  = (lo + hi) / 2;
+  const p1 = pAt(z, q1), p2 = pAt(z, q2), t = p1 + p2;
+  return [p1/t, p2/t]; // renormalize for float safety
+}
+
+// Robust consensus probability: median of implied probabilities, with
+// outlier quotes (>3x scaled-MAD from the median) trimmed before averaging.
+// Needs at least 3 quotes to attempt outlier detection; below that, MAD is
+// too noisy to trust, so it just averages what's there.
+function robustProb(prices) {
+  if (!prices.length) return null;
+  const probs = prices.map(iP).slice().sort((a,b) => a-b);
+  const mid = Math.floor(probs.length/2);
+  const median = probs.length % 2 ? probs[mid] : (probs[mid-1]+probs[mid])/2;
+  if (probs.length < MIN_CB) return probs.reduce((a,b)=>a+b,0) / probs.length;
+  const devs = probs.map(p => Math.abs(p-median)).sort((a,b)=>a-b);
+  const dMid = Math.floor(devs.length/2);
+  const mad  = (devs.length % 2 ? devs[dMid] : (devs[dMid-1]+devs[dMid])/2) * 1.4826;
+  const kept = mad > 0 ? probs.filter(p => Math.abs(p-median) <= 3*mad) : probs;
+  return kept.reduce((a,b)=>a+b,0) / kept.length;
+}
+
+// Format
+const fO    = o => o == null ? '—' : o > 0 ? `+${o}` : `${o}`;
+const fE    = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(2)}%`;
+const fCLV  = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
+const fDT   = iso => new Date(iso).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+const fDate = iso => new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+const today = () => new Date().toISOString().slice(0,10);
+const uid   = () => Math.random().toString(36).slice(2,8);
+const esc   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// Days until a game
+function daysUntil(iso) {
+  const diff = new Date(iso) - new Date();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+// Storage
+const mem = {};
+const LS = {
+  get(k)   { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return mem[k]||null; } },
+  set(k,v) { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} mem[k]=v; }
+};
+
+// State
+const st = { loading:true, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false };
+
+function bdg(cls, text) {
+  return `<span class="badge b-${cls||'neutral'}">${esc(String(text))}</span>`;
+}
+function getRes(id) { return st.history.find(h=>h.id===id)?.result||null; }
+
+// Pick card — type is 'near' or 'future'
+function rCard(p, type) {
+  if (!p) return '';
+  const isNear   = type === 'near';
+  const res      = getRes(p.id);
+  const resBadge = res
+    ? `<div style="margin-top:10px">${bdg(res==='W'?'success':res==='L'?'danger':'warning', res==='W'?'Win':res==='L'?'Loss':'Push')}</div>`
+    : '';
+  const clv      = p.closingLine != null ? cCLV(p.line, p.closingLine) : null;
+  const clvLine  = clv != null
+    ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">
+         Closing line: <span class="mono" style="color:var(--text)">${fO(p.closingLine)}</span>
+         &ensp;&middot;&ensp;
+         <span class="mono" style="font-weight:500;color:${clv>=0?'var(--green)':'var(--red)'}">${fCLV(clv)} CLV</span>
+       </div>`
+    : `<div style="margin-top:10px;font-size:11px;color:var(--text3)">Closing line not captured yet — open emBET again before this game starts to track it.</div>`;
+  const days     = daysUntil(p.commenceTime);
+  const daysTxt  = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days} days away`;
+
+  return `
+  <div class="${isNear ? 'near-card' : 'future-card'}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px">
+          ${bdg('neutral', p.sport)}
+          ${bdg('neutral', p.mkt)}
+          ${bdg(p.sharp ? 'info' : 'warning', p.sharp ? 'Pinnacle ref' : 'Consensus')}
+          ${bdg('neutral', daysTxt)}
+        </div>
+        <div style="font-size:18px;font-weight:500;margin-bottom:3px">${esc(p.bet)}</div>
+        <div style="font-size:13px;color:var(--text2)">${esc(p.game)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px">${fDT(p.commenceTime)}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div class="mono" style="font-size:30px;font-weight:500;color:var(--green);line-height:1">${fE(p.edge)}</div>
+        <div class="lbl" style="margin-top:3px;margin-bottom:0">edge</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:10px 12px;background:var(--bg);border-radius:6px">
+      <div>
+        <span class="lbl">Book</span>
+        <div style="font-size:15px;font-weight:500">${esc(p.book)}</div>
+      </div>
+      <div>
+        <span class="lbl">Line</span>
+        <div class="mono" style="font-size:22px;font-weight:500">${fO(p.line)}</div>
+      </div>
+      <div>
+        <span class="lbl">Fair value</span>
+        <div class="mono" style="font-size:15px;color:var(--text2)">${fO(p.fairOdds)}</div>
+      </div>
+    </div>
+    ${resBadge}
+    ${clvLine}
+  </div>`;
+}
+
+function render() {
+  const app = document.getElementById('app');
+  if (!app) return;
+
+  // API key setup screen
+  if (!st.keyReady) {
+    app.innerHTML = `
+    <div style="max-width:460px;margin:40px auto 0">
+      <div style="margin-bottom:28px">
+        <div style="font-size:30px;font-weight:500;letter-spacing:-1.5px;color:var(--text);margin-bottom:6px">em<span style="color:var(--accent)">BET</span></div>
+        <div style="font-size:13px;color:var(--text2)">Daily EV+ picks across active sports</div>
+      </div>
+      <div class="card">
+        <div style="font-weight:500;font-size:16px;margin-bottom:8px">Enter your Odds API key</div>
+        <p style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:16px">
+          Get a free key at
+          <a href="https://the-odds-api.com" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">the-odds-api.com</a>.
+          Free tier covers ~500 requests/month—enough for daily use.
+          Your key stays in your browser and is never shared.
+        </p>
+        <input id="key-inp" type="password" placeholder="Paste your key here"
+          style="width:100%;padding:9px 12px;border:0.5px solid var(--border-md);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--sans);margin-bottom:12px;box-sizing:border-box"
+          onkeydown="if(event.key==='Enter') EL.saveKey()"/>
+        <button class="btn" style="background:var(--accent-bg);border-color:var(--accent-border);color:var(--accent);font-weight:500" onclick="EL.saveKey()">Connect</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  // Settle modal
+  if (st.settleId) {
+    const p = [st.picks?.near, st.picks?.future, ...st.pending, ...st.history].find(x => x && x.id === st.settleId);
+    if (!p) { st.settleId = null; render(); return; }
+    const cur = getRes(p.id) || '';
+    app.innerHTML = `
+    <div style="max-width:380px;margin:40px auto">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <span style="font-weight:500;font-size:16px">Settle pick</span>
+          <button style="background:none;border:none;cursor:pointer;color:var(--text2);font-size:22px;line-height:1;padding:0" onclick="EL.closeSettle()">×</button>
+        </div>
+        <div style="font-size:13px;font-weight:500;margin-bottom:3px">${esc(p.bet)}</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:18px">${esc(p.game)}</div>
+        <div style="display:flex;gap:8px">
+          ${['W','L','P'].map(r=>`<button class="rbtn${cur===r?' '+r:''}" onclick="EL.settle('${p.id}','${r}')">${r==='W'?'Win':r==='L'?'Loss':'Push'}</button>`).join('')}
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:14px">
+          <button class="btn" onclick="EL.closeSettle()">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  // Performance
+  const settled = st.history.filter(p => p.result);
+  const W   = settled.filter(p => p.result==='W').length;
+  const L   = settled.filter(p => p.result==='L').length;
+  const P   = settled.filter(p => p.result==='P').length;
+  const pnl = settled.reduce((s,p) => {
+    if (p.result==='W') return s + FLAT*(tD(p.line)-1);
+    if (p.result==='L') return s - FLAT;
+    return s;
+  }, 0);
+  const hasPF  = (W+L+P) > 0;
+  const pColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  const clvSet = [...st.pending, ...st.history].filter(p => p.closingLine != null);
+  const avgClv = clvSet.length ? clvSet.reduce((s,p) => s + cCLV(p.line, p.closingLine), 0) / clvSet.length : null;
+
+  // History — pending (unsettled, possibly spanning many days) + settled
+  const allHist = [...st.pending, ...st.history]
+    .sort((a,b) => new Date(b.commenceTime) - new Date(a.commenceTime))
+    .slice(0, 14);
+
+  const histRows = allHist.map(p => {
+    const r   = getRes(p.id) || p.result;
+    const tag = r
+      ? bdg(r==='W'?'success':r==='L'?'danger':'warning', r==='W'?'Win':r==='L'?'Loss':'Push')
+      : `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="EL.openSettle('${p.id}')">Settle</button>`;
+    const days = daysUntil(p.commenceTime);
+    const horizon = p.horizon === 'future'
+      ? bdg('warning', 'future')
+      : bdg('info', 'near');
+    const clv = p.closingLine != null ? cCLV(p.line, p.closingLine) : null;
+    const clvTag = clv != null
+      ? `<span class="mono" style="font-size:11px;font-weight:500;color:${clv>=0?'var(--green)':'var(--red)'}">${fCLV(clv)}</span>`
+      : `<span style="font-size:11px;color:var(--text3)">—</span>`;
+    return `<tr>
+      <td style="font-size:11px;color:var(--text2);white-space:nowrap">${fDate(p.commenceTime)}</td>
+      <td>
+        <div style="font-size:12px;font-weight:500">${esc(p.bet)}</div>
+        <div style="font-size:11px;color:var(--text2)">${esc(p.game)}</div>
+      </td>
+      <td style="white-space:nowrap">
+        <span class="mono" style="font-size:12px">${fO(p.line)}</span>
+        &nbsp;${bdg('neutral', p.sport)}
+        &nbsp;${horizon}
+      </td>
+      <td>${clvTag}</td>
+      <td>${tag}</td>
+    </tr>`;
+  }).join('');
+
+  const errHint = st.err && (st.err.toLowerCase().includes('fetch') || st.err.toLowerCase().includes('network') || st.err.toLowerCase().includes('failed'))
+    ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">emBET requires direct network access to the-odds-api.com. If you're inside Claude's viewer, download the file and open it in your browser—or host it on GitHub Pages for a permanent shareable link.</div>`
+    : '';
+
+  const hasPicks = st.picks?.near || st.picks?.future;
+  const refreshing = st.loading && !!st.picks; // background rescan in progress while old picks are still on screen
+
+  app.innerHTML = `
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+    <div style="font-size:30px;font-weight:500;letter-spacing:-1.5px;color:var(--text)">em<span style="color:var(--accent)">BET</span></div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="font-size:12px;color:var(--text2)">${new Date().toLocaleDateString('en-US',{weekday:'short',month:'long',day:'numeric',year:'numeric'})}</div>
+      <button class="btn" style="font-size:11px;padding:3px 9px" ${refreshing?'disabled':''} onclick="EL.retry()">${refreshing?'Rescanning…':'Rescan'}</button>
+      <button class="btn" style="font-size:11px;padding:3px 9px" onclick="EL.changeKey()">Change key</button>
+    </div>
+  </div>
+  <div style="font-size:12px;color:var(--text3);margin-bottom:22px;min-height:18px">
+    ${st.picks
+      ? `Scanned at ${new Date(st.picks.generatedAt).toLocaleTimeString()} &middot; ${st.picks.total} EV+ plays found${refreshing?' &middot; rescanning for newer lines&hellip;':''}`
+      : st.loading ? 'Scanning active lines&hellip;' : ''}
+  </div>
+
+  ${st.err ? `
+  <div style="background:var(--red-bg);color:var(--red);border:0.5px solid var(--red-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
+    <div style="font-weight:500;margin-bottom:3px;font-size:13px">Could not fetch odds</div>
+    <div style="font-size:13px">${esc(st.err)}</div>
+    ${errHint}
+    <div style="margin-top:10px"><button class="btn" style="font-size:12px" onclick="EL.retry()">Try again</button></div>
+  </div>` : ''}
+
+  ${st.loading && !st.picks ? `
+  <div style="text-align:center;padding:80px 0;color:var(--text2)">
+    <div class="mono" style="font-size:20px;letter-spacing:6px;color:var(--text3);margin-bottom:16px">···</div>
+    <div style="font-size:13px">Scanning active lines for edge</div>
+  </div>` : ''}
+
+  ${!st.loading && !hasPicks && !st.err ? `
+  <div style="text-align:center;padding:80px 0;color:var(--text2)">
+    <div style="font-size:15px;font-weight:500;color:var(--text);margin-bottom:8px">No plays found</div>
+    <div style="font-size:13px;margin-bottom:16px">No EV+ opportunities at or above the ${(MIN_EDGE*100).toFixed(1)}% edge floor as of the last scan${st.picks?` (${new Date(st.picks.generatedAt).toLocaleTimeString()})`:''}. Lines move throughout the day, so this can change without you doing anything — rescan to check the current board.</div>
+    <button class="btn" onclick="EL.retry()">Rescan now</button>
+  </div>` : ''}
+
+  ${hasPicks ? `<div class="section-divider">Bet within 3 days</div>` : ''}
+  ${st.picks?.near
+    ? rCard(st.picks.near, 'near')
+    : hasPicks ? `<div class="empty-window">No EV+ plays found for games in the next 72 hours.</div>` : ''}
+
+  ${hasPicks ? `<div class="section-divider">Plan ahead — within 3 months</div>` : ''}
+  ${st.picks?.future
+    ? rCard(st.picks.future, 'future')
+    : hasPicks ? `<div class="empty-window">No EV+ plays found for games in the 3-month window.</div>` : ''}
+
+  <div class="card" style="font-size:13px;line-height:1.8;margin-top:8px">
+    <div class="lbl" style="margin-bottom:6px">Track record since ${START}</div>
+    ${hasPF
+      ? `<span style="font-weight:500">${W}W &thinsp;&mdash;&thinsp; ${L}L${P>0?` &thinsp;&mdash;&thinsp; ${P}P`:''}</span>
+         &ensp;&middot;&ensp;
+         <span class="mono" style="font-weight:500;color:${pColor}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span>
+         <span style="color:var(--text2)"> at $${FLAT} flat</span>`
+      : `<span style="color:var(--text2)">No results recorded yet. Use Pick history to settle each pick after games finish.</span>`}
+    ${avgClv != null ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">Avg CLV across ${clvSet.length} priced pick${clvSet.length===1?'':'s'}: <span class="mono" style="font-weight:500;color:${avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(avgClv)}</span> — the part of the record that isn't just variance.</div>` : ''}
+  </div>
+
+  ${allHist.length > 0 ? `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer" onclick="EL.toggleHist()">
+      <span style="font-size:13px;font-weight:500">Pick history</span>
+      <button class="btn" style="font-size:11px;padding:3px 10px">${st.showHist?'Hide':'Show'}</button>
+    </div>
+    ${st.showHist ? `<div style="overflow-x:auto"><table class="tbl"><tbody>${histRows}</tbody></table></div>` : ''}
+  </div>` : ''}
+  `;
+}
+
+// Event handlers
+window.EL = {
+  saveKey() {
+    const v = (document.getElementById('key-inp') || {}).value || '';
+    if (!v.trim()) return;
+    AK = v.trim();
+    LS.set('embet_ak', AK);
+    st.keyReady = true;
+    render();
+    scan();
+  },
+  changeKey() {
+    AK = '';
+    LS.set('embet_ak', '');
+    st.keyReady = false;
+    st.picks    = null;
+    st.loading  = false;
+    st.err      = '';
+    render();
+  },
+  openSettle(id)  { st.settleId = id; render(); },
+  closeSettle()   { st.settleId = null; render(); },
+  toggleHist()    { st.showHist = !st.showHist; render(); },
+  retry()         { st.err = ''; st.loading = true; render(); scan(); },
+  async settle(id, result) {
+    const pick = [st.picks?.near, st.picks?.future, ...st.pending, ...st.history].find(p => p && p.id === id);
+    if (!pick) return;
+    const done = { ...pick, result, settledAt: new Date().toISOString() };
+    const i    = st.history.findIndex(h => h.id === id);
+    if (i >= 0) st.history[i] = done; else st.history.push(done);
+    st.pending = st.pending.filter(p => p.id !== id);
+    LS.set('embet_history', st.history);
+    LS.set('embet_pending', st.pending);
+    st.settleId = null;
+    render();
+  }
+};
+
+// Update closing-line snapshots for any pending pick tied to this game.
+// The Odds API stops returning a game once it starts, so whatever price
+// we last captured before that becomes our best proxy for the closing line.
+const MKT_KEY = { ML: 'h2h', Spread: 'spreads', Total: 'totals' };
+function captureClosing(g) {
+  const matches = st.pending.filter(p => p.gameId === g.id);
+  for (const p of matches) {
+    const bm  = g.bookmakers.find(b => (b.title || b.key) === p.book);
+    const mkt = bm?.markets?.find(m => m.key === MKT_KEY[p.mkt]);
+    const out = mkt?.outcomes?.find(o => {
+      const pt = o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : '';
+      return p.bet === `${o.name}${pt}`;
+    });
+    if (out && out.price != null) {
+      p.closingLine = out.price;
+      p.closingAt   = new Date().toISOString();
+    }
+  }
+}
+
+// Add a freshly generated near/future pick to the persisted pending list,
+// unless that exact wager (same game, market, side, book) is already
+// being tracked — in which case keep the original so the opening line
+// we're measuring CLV against doesn't silently drift day to day.
+function mergePending(pick) {
+  if (!pick) return null;
+  const existing = st.pending.find(p =>
+    p.gameId === pick.gameId && p.mkt === pick.mkt && p.bet === pick.bet && p.book === pick.book
+  );
+  if (existing) return existing;
+  st.pending.push(pick);
+  return pick;
+}
+
+// Scan the Odds API
+async function scan() {
+  try {
+    const sRes = await fetch(`${OB}/sports/?apiKey=${AK}`);
+    if (!sRes.ok) throw new Error(`Sports list error ${sRes.status}. Check the API key.`);
+    const allSports = await sRes.json();
+
+    const active = allSports.filter(s => s.active && !s.has_outrights);
+    const sorted = [
+      ...PRI.filter(k => active.find(s => s.key === k)),
+      ...active.filter(s => !PRI.includes(s.key)).map(s => s.key)
+    ].slice(0, 8);
+
+    const opps = [];
+
+    for (const sport of sorted) {
+      const url = new URL(`${OB}/sports/${sport}/odds/`);
+      url.searchParams.set('apiKey',     AK);
+      url.searchParams.set('regions',    'us');
+      url.searchParams.set('markets',    'h2h,spreads,totals');
+      url.searchParams.set('oddsFormat', 'american');
+      url.searchParams.set('bookmakers',  BKS);
+
+      const res = await fetch(url.toString());
+      if (!res.ok) {
+        if (res.status === 429) throw new Error('API quota reached for this period.');
+        continue;
+      }
+
+      const games    = await res.json();
+      const now      = new Date();
+      const sportLbl = allSports.find(s => s.key === sport)?.title || sport;
+
+      for (const g of games) {
+        captureClosing(g);
+        if (new Date(g.commence_time) <= now) continue;
+
+        const pin = g.bookmakers.find(b => b.key === 'pinnacle');
+
+        for (const mkt of ['h2h', 'spreads', 'totals']) {
+          const pm = pin?.markets?.find(m => m.key === mkt);
+          let fm = null, sharpRef = false;
+
+          if (pm?.outcomes?.length === 2) {
+            const [a, b] = pm.outcomes;
+            const [fa, fb] = shinProb(iP(a.price), iP(b.price));
+            fm = { [a.name]: fa, [b.name]: fb };
+            sharpRef = true;
+          } else {
+            const pools = {};
+            for (const bm of g.bookmakers) {
+              const m2 = bm.markets?.find(m => m.key === mkt);
+              if (!m2?.outcomes || m2.outcomes.length !== 2) continue;
+              for (const o of m2.outcomes) {
+                if (!pools[o.name]) pools[o.name] = [];
+                pools[o.name].push(o.price);
+              }
+            }
+            const nm = Object.keys(pools);
+            if (nm.length === 2 && pools[nm[0]].length >= MIN_CB && pools[nm[1]].length >= MIN_CB) {
+              const pA = robustProb(pools[nm[0]]);
+              const pB = robustProb(pools[nm[1]]);
+              if (pA != null && pB != null) {
+                const [sA, sB] = shinProb(pA, pB);
+                fm = { [nm[0]]: sA, [nm[1]]: sB };
+              }
+            }
+          }
+
+          if (!fm) continue;
+
+          for (const bm of g.bookmakers) {
+            if (bm.key === 'pinnacle') continue;
+            const m = bm.markets?.find(m => m.key === mkt);
+            if (!m?.outcomes) continue;
+
+            for (const o of m.outcomes) {
+              const fair = fm[o.name];
+              if (fair == null) continue;
+              const edge = cEV(fair, o.price);
+              if (edge <= MIN_EDGE) continue;
+
+              const mktLbl = mkt === 'h2h' ? 'ML' : mkt === 'spreads' ? 'Spread' : 'Total';
+              const pt     = o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : '';
+
+              opps.push({
+                id:           uid(),
+                gameId:       g.id,
+                sport:        sportLbl,
+                game:         `${g.away_team} @ ${g.home_team}`,
+                commenceTime: g.commence_time,
+                mkt:          mktLbl,
+                bet:          `${o.name}${pt}`,
+                book:         bm.title || bm.key,
+                line:         o.price,
+                fairOdds:     tA(1 / fair),
+                fairProb:     fair,
+                edge,
+                sharp:        sharpRef,
+                closingLine:  null,
+                closingAt:    null,
+                result:       null
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Sort by EV (Pinnacle-referenced picks get a slight boost)
+    opps.sort((a, b) =>
+      (b.edge + (b.sharp ? 0.001 : 0)) - (a.edge + (a.sharp ? 0.001 : 0))
+    );
+
+    const now     = Date.now();
+    const cut72h  = now + H72;
+    const cut90d  = now + H90D;
+
+    // Best EV play within 72 hours
+    const nearOpps   = opps.filter(o => new Date(o.commenceTime).getTime() <= cut72h);
+    // Best EV play between 72 hours and 90 days
+    const futureOpps = opps.filter(o => {
+      const t = new Date(o.commenceTime).getTime();
+      return t > cut72h && t <= cut90d;
+    });
+
+    const nearPick   = nearOpps[0]   ? { ...nearOpps[0],   horizon: 'near'   } : null;
+    const futurePick = futureOpps[0] ? { ...futureOpps[0], horizon: 'future' } : null;
+
+    const near   = mergePending(nearPick);
+    const future = mergePending(futurePick);
+    LS.set('embet_pending', st.pending);
+
+    const picks = {
+      date:        today(),
+      generatedAt: new Date().toISOString(),
+      near,
+      future,
+      total:       opps.length
+    };
+
+    st.picks = picks;
+    LS.set('embet_picks_' + today(), picks);
+
+  } catch (e) {
+    st.err = e.message || 'Failed to fetch odds.';
+  }
+
+  st.loading = false;
+  render();
+}
+
+// Init
+function init() {
+  const h = LS.get('embet_history');
+  if (h) st.history = h;
+
+  const pend = LS.get('embet_pending');
+  if (pend) st.pending = pend;
+
+  const savedKey = LS.get('embet_ak');
+  if (savedKey) {
+    AK          = savedKey;
+    st.keyReady = true;
+  }
+
+  if (!AK) {
+    st.loading = false;
+    render(); // show key setup screen
+    return;
+  }
+
+  const cached = LS.get('embet_picks_' + today());
+  // Validate cache is new near/future format — old builds stored primary/alternate
+  if (cached && 'near' in cached) {
+    st.picks   = cached;
+    st.loading = false;
+    const age  = Date.now() - new Date(cached.generatedAt).getTime();
+    if (age > STALE_MS) {
+      // Cache is stale (e.g. an earlier scan found nothing and that
+      // result would otherwise sit there unchanged all day). Show what
+      // we have immediately, then kick off a fresh scan in the background
+      // so the screen updates the moment new data lands.
+      st.loading = true;
+      render();
+      scan();
+    } else {
+      render();
+    }
+  } else {
+    // Stale or wrong-format cache — discard and rescan
+    render();
+    scan();
+  }
+}
+
+init();
+</script>
+</body>
+</html>
