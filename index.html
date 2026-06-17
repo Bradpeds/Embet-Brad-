@@ -621,6 +621,13 @@ async function scan() {
 
         const pin = g.bookmakers.find(b => b.key === 'pinnacle');
 
+        // Outcomes must match on BOTH side and point. "Team X" at -1.5 and
+        // "Team X" at -2.5 are different bets with different fair prices —
+        // keying only by name (the original bug) let the app apply one
+        // book's fair line to a completely different number at another
+        // book, producing nonsense "edges" like 70%+ on an MLB run line.
+        const oKey = (name, point) => point != null ? `${name}|${point}` : name;
+
         for (const mkt of ['h2h', 'spreads', 'totals']) {
           const pm = pin?.markets?.find(m => m.key === mkt);
           let fm = null, sharpRef = false;
@@ -628,25 +635,46 @@ async function scan() {
           if (pm?.outcomes?.length === 2) {
             const [a, b] = pm.outcomes;
             const [fa, fb] = shinProb(iP(a.price), iP(b.price));
-            fm = { [a.name]: fa, [b.name]: fb };
+            fm = { [oKey(a.name, a.point)]: fa, [oKey(b.name, b.point)]: fb };
             sharpRef = true;
           } else {
-            const pools = {};
+            // No Pinnacle line — build a consensus, but only from books that
+            // are quoting the exact same point. Group every outcome seen
+            // across books by its point number, then use whichever point
+            // has the most total quotes (i.e. the number most books agree
+            // is "the" line) as the anchor. Alt lines at other numbers are
+            // ignored rather than blended in.
+            const pools = {}; // oKey -> { point, prices: [] }
             for (const bm of g.bookmakers) {
               const m2 = bm.markets?.find(m => m.key === mkt);
               if (!m2?.outcomes || m2.outcomes.length !== 2) continue;
               for (const o of m2.outcomes) {
-                if (!pools[o.name]) pools[o.name] = [];
-                pools[o.name].push(o.price);
+                const k = oKey(o.name, o.point);
+                if (!pools[k]) pools[k] = { point: o.point, prices: [] };
+                pools[k].prices.push(o.price);
               }
             }
-            const nm = Object.keys(pools);
-            if (nm.length === 2 && pools[nm[0]].length >= MIN_CB && pools[nm[1]].length >= MIN_CB) {
-              const pA = robustProb(pools[nm[0]]);
-              const pB = robustProb(pools[nm[1]]);
-              if (pA != null && pB != null) {
-                const [sA, sB] = shinProb(pA, pB);
-                fm = { [nm[0]]: sA, [nm[1]]: sB };
+            const byPoint = {};
+            for (const k in pools) {
+              const pk = String(pools[k].point);
+              (byPoint[pk] ||= []).push(k);
+            }
+            let bestKeys = null, bestCount = 0;
+            for (const pk in byPoint) {
+              const keys = byPoint[pk];
+              if (keys.length !== 2) continue; // need exactly two sides at this number to de-vig
+              const count = keys.reduce((s, k) => s + pools[k].prices.length, 0);
+              if (count > bestCount) { bestCount = count; bestKeys = keys; }
+            }
+            if (bestKeys) {
+              const [k1, k2] = bestKeys;
+              if (pools[k1].prices.length >= MIN_CB && pools[k2].prices.length >= MIN_CB) {
+                const pA = robustProb(pools[k1].prices);
+                const pB = robustProb(pools[k2].prices);
+                if (pA != null && pB != null) {
+                  const [sA, sB] = shinProb(pA, pB);
+                  fm = { [k1]: sA, [k2]: sB };
+                }
               }
             }
           }
@@ -659,8 +687,8 @@ async function scan() {
             if (!m?.outcomes) continue;
 
             for (const o of m.outcomes) {
-              const fair = fm[o.name];
-              if (fair == null) continue;
+              const fair = fm[oKey(o.name, o.point)];
+              if (fair == null) continue; // this book's number doesn't match the line we have a fair price for — skip rather than guess
               const edge = cEV(fair, o.price);
               if (edge <= MIN_EDGE) continue;
 
