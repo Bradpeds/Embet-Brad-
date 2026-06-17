@@ -184,6 +184,7 @@ const H90D   = 90  * 24 * 60 * 60 * 1000; // 90 days in ms
 const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours — cached picks older than this trigger an automatic background rescan on load instead of sitting stale for the rest of the day. Raise this (or remove the auto-rescan call in init()) if you're tight on the free-tier 500/month request quota — each scan costs ~9 requests.
 const MIN_CB = 3;   // min book quotes per side before trusting a consensus fair line
 const MIN_EDGE = 0.015; // min modeled edge (1.5%) before a play is worth surfacing — below this, it's more likely de-vig noise or a stale line than a repeatable advantage
+const SANITY_EDGE = 0.20; // real sharp-vs-soft mispricings essentially never exceed ~20%. Anything above this is far more likely a data/matching issue (e.g. mismatched lines, a stale quote) than a genuine opportunity — those get pulled out of the main picks and flagged separately instead of being presented as something to bet.
 const PRI = [
   'baseball_mlb','basketball_nba','icehockey_nhl',
   'americanfootball_nfl','americanfootball_ncaaf',
@@ -329,6 +330,18 @@ function rCard(p, type) {
     </div>
     ${resBadge}
     ${clvLine}
+  </div>`;
+}
+
+function flagCard(o) {
+  return `
+  <div class="card" style="border-left:3px solid var(--red);font-size:13px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">
+      <div style="font-weight:500">${esc(o.bet)} <span style="color:var(--text2);font-weight:400">&middot; ${esc(o.book)}</span></div>
+      <span class="mono" style="color:var(--red);font-weight:500;white-space:nowrap">${fE(o.edge)}</span>
+    </div>
+    <div style="color:var(--text2);font-size:12px">${esc(o.game)} &middot; ${esc(o.sport)} &middot; ${esc(o.mkt)}</div>
+    <div style="color:var(--text2);font-size:12px;margin-top:6px">Edge exceeds the ${(SANITY_EDGE*100).toFixed(0)}% sanity cap — real sharp-vs-soft mispricings essentially never get this large. Treat this as a possible data issue, not a play, until checked manually against the actual book.</div>
   </div>`;
 }
 
@@ -487,6 +500,11 @@ function render() {
   ${st.picks?.future
     ? rCard(st.picks.future, 'future')
     : hasPicks ? `<div class="empty-window">No EV+ plays found for games in the 3-month window.</div>` : ''}
+
+  ${(st.picks?.flagged?.length || 0) > 0 ? `
+  <div class="section-divider">Flagged — not shown as picks</div>
+  ${st.picks.flagged.map(flagCard).join('')}
+  ` : ''}
 
   <div class="card" style="font-size:13px;line-height:1.8;margin-top:8px">
     <div class="lbl" style="margin-bottom:6px">Track record since ${START}</div>
@@ -709,6 +727,7 @@ async function scan() {
                 fairProb:     fair,
                 edge,
                 sharp:        sharpRef,
+                suspicious:   edge > SANITY_EDGE,
                 closingLine:  null,
                 closingAt:    null,
                 result:       null
@@ -728,13 +747,18 @@ async function scan() {
     const cut72h  = now + H72;
     const cut90d  = now + H90D;
 
-    // Best EV play within 72 hours
-    const nearOpps   = opps.filter(o => new Date(o.commenceTime).getTime() <= cut72h);
+    // Best EV play within 72 hours (implausible edges excluded — see SANITY_EDGE)
+    const nearOpps   = opps.filter(o => !o.suspicious && new Date(o.commenceTime).getTime() <= cut72h);
     // Best EV play between 72 hours and 90 days
     const futureOpps = opps.filter(o => {
+      if (o.suspicious) return false;
       const t = new Date(o.commenceTime).getTime();
       return t > cut72h && t <= cut90d;
     });
+    // Anything that cleared the edge floor but tripped the sanity cap — not
+    // selected as a pick, but worth seeing so a real bug (like the point-
+    // mismatch one) gets noticed quickly instead of silently disappearing.
+    const flagged = opps.filter(o => o.suspicious).slice(0, 3);
 
     const nearPick   = nearOpps[0]   ? { ...nearOpps[0],   horizon: 'near'   } : null;
     const futurePick = futureOpps[0] ? { ...futureOpps[0], horizon: 'future' } : null;
@@ -748,6 +772,7 @@ async function scan() {
       generatedAt: new Date().toISOString(),
       near,
       future,
+      flagged,
       total:       opps.length
     };
 
