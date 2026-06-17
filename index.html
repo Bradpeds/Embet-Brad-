@@ -379,7 +379,7 @@ function rCard(p, type) {
         <div class="mono" style="font-size:22px;font-weight:500">${fO(p.line)}</div>
       </div>
       <div>
-        <span class="lbl">Fair value</span>
+        <span class="lbl">Reference price</span>
         <div class="mono" style="font-size:15px;color:var(--text2)">${fO(p.fairOdds)}</div>
       </div>
       ${kStake!=null ? `
@@ -389,7 +389,7 @@ function rCard(p, type) {
       </div>` : ''}
     </div>
     ${(p.sharp && !p.pinnacleDeep) ? `<div style="margin-top:8px;font-size:11px;color:var(--amber)">Pinnacle is the reference here, but it carries much less volume in ${esc(p.sport)} than in the major pro leagues — treat "fair value" as a rougher anchor, not a precise probability.</div>` : ''}
-    ${kStake!=null ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">Stake sizing assumes the fair-probability estimate above is accurate. Real-world uncertainty in that estimate may justify a smaller wager than shown.</div>` : ''}
+    ${kStake!=null ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">Stake sizing assumes the reference price's implied probability is accurate. Real-world uncertainty in that estimate may justify a smaller wager than shown.</div>` : ''}
     ${kStake==null ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">No bankroll set — <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">tap to enable stake-sizing suggestions</span></div>` : ''}
     ${resBadge}
     ${clvLine}
