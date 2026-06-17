@@ -389,6 +389,7 @@ function rCard(p, type) {
       </div>` : ''}
     </div>
     ${(p.sharp && !p.pinnacleDeep) ? `<div style="margin-top:8px;font-size:11px;color:var(--amber)">Pinnacle is the reference here, but it carries much less volume in ${esc(p.sport)} than in the major pro leagues — treat "fair value" as a rougher anchor, not a precise probability.</div>` : ''}
+    ${kStake!=null ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">Stake sizing assumes the fair-probability estimate above is accurate. Real-world uncertainty in that estimate may justify a smaller wager than shown.</div>` : ''}
     ${kStake==null ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">No bankroll set — <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">tap to enable stake-sizing suggestions</span></div>` : ''}
     ${resBadge}
     ${clvLine}
@@ -428,12 +429,28 @@ function calibrationRows() {
     const inB = tracked.filter(p => p.edge >= b.lo && p.edge < b.hi);
     const clvs = inB.map(p => cCLV(p.line, p.closingLine));
     const avg  = clvs.length ? clvs.reduce((a,c)=>a+c,0) / clvs.length : null;
-    return { label: b.label, n: inB.length, avgClv: avg };
+    return { label: b.label, n: inB.length, avgClv: avg, lo: b.lo };
   });
+}
+// If a low-edge bucket has enough sample to judge and is running negative
+// while a higher bucket (also with enough sample) is running positive, that's
+// the calibration table actually doing its job: it's telling you the low end
+// of your edge estimates isn't predictive, and your threshold should move up
+// to where the signal starts. Both buckets need SAMPLE_EARLY+ to avoid acting
+// on noise -- this should get more confident as history accumulates, not less.
+function calibrationRecommendation(rows) {
+  const usable = rows.filter(r => r.n >= SAMPLE_EARLY && r.avgClv != null);
+  if (usable.length < 2) return null;
+  const lowest = usable[0];
+  if (lowest.avgClv > 0) return null;
+  const better = usable.slice(1).find(r => r.avgClv > 0);
+  if (!better) return null;
+  return { from: lowest.label, to: better.label, newFloor: better.lo, fromClv: lowest.avgClv, toClv: better.avgClv };
 }
 function calibrationCard() {
   const rows = calibrationRows();
   const totalN = rows.reduce((s,r)=>s+r.n,0);
+  const rec = calibrationRecommendation(rows);
   const body = rows.map(r => `
     <tr>
       <td style="font-size:12px">${r.label}</td>
@@ -458,6 +475,11 @@ function calibrationCard() {
       </tr>
       ${body}
     </tbody></table>
+    ${rec ? `
+    <div style="padding:10px 16px;background:var(--amber-bg);border-top:0.5px solid var(--amber-border)">
+      <div style="font-size:12px;color:var(--amber);font-weight:500">${rec.from} is running ${fCLV(rec.fromClv)} avg CLV while ${rec.to} is running ${fCLV(rec.toClv)} — with enough sample in both to take seriously.</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">Worth raising your minimum edge to ${(rec.newFloor*100).toFixed(1)}%. <button class="btn" style="font-size:11px;padding:2px 9px;margin-left:4px" onclick="EL.saveSetting('minEdge', ${rec.newFloor})">Apply</button></div>
+    </div>` : ''}
   </div>`;
 }
 
@@ -770,10 +792,29 @@ function captureClosing(g) {
 // we're measuring CLV against doesn't silently drift day to day.
 function mergePending(pick) {
   if (!pick) return null;
-  const existing = st.pending.find(p =>
+  const idx = st.pending.findIndex(p =>
     p.gameId === pick.gameId && p.mkt === pick.mkt && p.bet === pick.bet && p.book === pick.book
   );
-  if (existing) return existing;
+  if (idx >= 0) {
+    const existing = st.pending[idx];
+    // CLV tracking depends on the price that was actually open when this
+    // pick was first surfaced -- that and anything already captured must
+    // never be overwritten by a later rescan. Everything else (edge, fair
+    // value, sharp/Pinnacle-depth labels, etc.) is just display metadata,
+    // and should refresh to the latest computed values -- otherwise a pick
+    // tracked before some later fix (like a badge correction) stays frozen
+    // showing the old, wrong metadata forever.
+    const merged = {
+      ...pick,
+      id:          existing.id,
+      line:        existing.line,
+      closingLine: existing.closingLine,
+      closingAt:   existing.closingAt,
+      result:      existing.result
+    };
+    st.pending[idx] = merged;
+    return merged;
+  }
   st.pending.push(pick);
   return pick;
 }
