@@ -181,7 +181,7 @@ const BKS = 'pinnacle,draftkings,fanduel,betmgm,caesars,pointsbetus,betrivers,wi
 const START  = 'June 17, 2026';
 const FLAT   = 10;
 const H72    = 72  * 60 * 60 * 1000;   // 3 days in ms
-const H90D   = 90  * 24 * 60 * 60 * 1000; // 90 days in ms
+const HFAR   = 14  * 24 * 60 * 60 * 1000; // upper bound on the "further out" window. The Odds API's default odds feed only returns games in roughly the next week regardless of this number — this is just a safety cap so a stray early-posted line way in the future doesn't show up looking like a confident edge. The real limit on how far ahead emBET sees is the feed, not this constant.
 const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours — cached picks older than this trigger an automatic background rescan on load instead of sitting stale for the rest of the day. Raise this (or remove the auto-rescan call in init()) if you're tight on the free-tier 500/month request quota — each scan costs ~9 requests.
 const MIN_CB = 3;   // min book quotes per side before trusting a consensus fair line
 // --- User-adjustable settings (defaults below; live values come from st.settings) ---
@@ -673,10 +673,10 @@ function render() {
     ? st.picks.near.map(p => rCard(p, 'near')).join('')
     : hasPicks ? `<div class="empty-window">No plays with an edge for games in the next 72 hours.</div>` : ''}
 
-  ${hasPicks ? `<div class="section-divider">Plan ahead — within 3 months</div>` : ''}
+  ${hasPicks ? `<div class="section-divider">Further out — as far as books are posting</div>` : ''}
   ${(st.picks?.future?.length || 0) > 0
     ? st.picks.future.map(p => rCard(p, 'future')).join('')
-    : hasPicks ? `<div class="empty-window">No plays with an edge for games in the 3-month window.</div>` : ''}
+    : hasPicks ? `<div class="empty-window">No plays beyond the next 3 days. emBET only sees games the books are currently pricing — typically about a week out, so this section is usually thin and often empty.</div>` : ''}
 
   ${(st.picks?.flagged?.length || 0) > 0 ? `
   <div class="section-divider">Flagged — not shown as picks</div>
@@ -965,15 +965,17 @@ async function scan() {
 
     const now     = Date.now();
     const cut72h  = now + H72;
-    const cut90d  = now + H90D;
+    const cutFar  = now + HFAR;
 
     // Best EV plays within 72 hours (implausible edges excluded — see SANITY_EDGE)
     const nearOpps   = opps.filter(o => !o.suspicious && new Date(o.commenceTime).getTime() <= cut72h);
-    // Best EV plays between 72 hours and 90 days
+    // Best plays beyond 72 hours, out to whatever the feed returns (the
+    // default odds endpoint only reaches ~a week ahead, so in practice this
+    // is "the rest of this week," not a long-range slate).
     const futureOpps = opps.filter(o => {
       if (o.suspicious) return false;
       const t = new Date(o.commenceTime).getTime();
-      return t > cut72h && t <= cut90d;
+      return t > cut72h && t <= cutFar;
     });
     // Anything that cleared the edge floor but tripped the sanity cap — not
     // selected as a pick, but worth seeing so a real bug (like the point-
