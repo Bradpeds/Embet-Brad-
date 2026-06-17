@@ -170,7 +170,8 @@
   <div id="app"></div>
   <div style="text-align:center;margin-top:44px;font-size:11px;color:var(--text3);line-height:1.8">
     emBET scans live lines across DraftKings, FanDuel, BetMGM, Caesars, and others daily.<br>
-    EV+ calculations use Pinnacle as the sharp-market reference where available, de-vigged with Shin's method (corrects for favorite-longshot bias) and filtered to a 1.5%+ modeled edge.
+    EV+ calculations use Pinnacle as the sharp-market reference where available, de-vigged with Shin's method (corrects for favorite-longshot bias) and filtered to a 1.5%+ modeled edge.<br>
+    This finds disagreement between books, not independent predictions — it doesn't know about injuries, weather, or lineups. Average CLV over a large sample is the real test of whether that disagreement is worth anything; any single result is noise.
   </div>
 </div>
 <script>
@@ -185,6 +186,11 @@ const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours — cached picks older than this
 const MIN_CB = 3;   // min book quotes per side before trusting a consensus fair line
 const MIN_EDGE = 0.015; // min modeled edge (1.5%) before a play is worth surfacing — below this, it's more likely de-vig noise or a stale line than a repeatable advantage
 const SANITY_EDGE = 0.20; // real sharp-vs-soft mispricings essentially never exceed ~20%. Anything above this is far more likely a data/matching issue (e.g. mismatched lines, a stale quote) than a genuine opportunity — those get pulled out of the main picks and flagged separately instead of being presented as something to bet.
+const TOP_N_PICKS = 3; // how many of the best-EV plays to surface per time window (near / future), ranked by edge, instead of just the single best one. More picks captures more of a day's total expected value, but also means more bets to track and more variance per day -- a deliberate volume/discipline tradeoff, not a free win. This doesn't cost extra API calls: every opportunity is already fetched in one scan regardless of how many get shown.
+const KELLY_FRACTION = 0.25; // quarter-Kelly. Full Kelly assumes the edge estimate is exactly right -- with one sharp reference book and a de-vig model, it usually isn't exactly right, and full Kelly is brutal on bankroll when the edge is overestimated. A quarter (sometimes half) of full Kelly is the standard real-world haircut for that uncertainty.
+const SAMPLE_EARLY       = 30;  // below this, results are close to pure noise
+const SAMPLE_DEVELOPING  = 100; // below this, treat any trend as provisional
+const SAMPLE_MEANINGFUL  = 250; // the reviewer's own bar for an ROI conclusion to mean something
 const PRI = [
   'baseball_mlb','basketball_nba','icehockey_nhl',
   'americanfootball_nfl','americanfootball_ncaaf',
@@ -198,6 +204,37 @@ const iP  = o => 1/tD(o);
 const tA  = d => d >= 2 ? Math.round((d-1)*100) : Math.round(-100/(d-1));
 const cEV = (f,o) => f*(tD(o)-1)-(1-f);
 const cCLV = (yourLine, closeLine) => iP(closeLine) - iP(yourLine); // + = line moved your way after you bet
+
+// Suggested stake via fractional Kelly. This is informational only -- the
+// tracked P&L elsewhere still uses the flat $FLAT stake for consistency,
+// since switching live staking strategy mid-record is a real decision, not
+// something to do silently. b = net profit per $1 staked at this price.
+function kellyStake(fairProb, americanOdds, bankroll) {
+  if (!bankroll || bankroll <= 0) return null;
+  const b = tD(americanOdds) - 1;
+  const fStar = fairProb - (1 - fairProb) / b; // = (b*p - q) / b
+  return bankroll * Math.max(0, fStar) * KELLY_FRACTION;
+}
+
+// Population stdev (n-1 denominator) -- used to put a rough confidence band
+// around average CLV so a positive number with a wide band reads as
+// "promising, not proven" rather than as a verdict.
+function stdev(arr, mean) {
+  if (arr.length < 2) return null;
+  const v = arr.reduce((s, x) => s + (x - mean) ** 2, 0) / (arr.length - 1);
+  return Math.sqrt(v);
+}
+
+// How much weight a given sample size actually deserves. n here is the
+// count of CLV-tracked picks, not settled W/L -- CLV is the metric that
+// reflects skill fastest, so it's the right thing to gate confidence on.
+function sampleNote(n) {
+  if (n === 0)                  return 'No closing lines captured yet — every number above is still zero signal.';
+  if (n < SAMPLE_EARLY)         return `Only ${n} CLV-tracked pick${n===1?'':'s'} — this is still essentially noise. Don't read anything into it yet.`;
+  if (n < SAMPLE_DEVELOPING)    return `${n} CLV-tracked picks — an early, developing trend. Provisional at best until ~${SAMPLE_DEVELOPING}.`;
+  if (n < SAMPLE_MEANINGFUL)    return `${n} CLV-tracked picks — enough to start meaning something, though a real ROI conclusion wants ${SAMPLE_MEANINGFUL}+.`;
+  return `${n} CLV-tracked picks — a real sample. Positive average CLV through this many bets is the strongest evidence this is finding actual edge, not luck.`;
+}
 
 // Shin's method de-vig for a two-outcome market (Shin 1992/1993).
 // Plain proportional de-vig (q_i / sum of q) spreads the vig evenly across
@@ -269,7 +306,7 @@ const LS = {
 };
 
 // State
-const st = { loading:true, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false };
+const st = { loading:true, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false, bankroll:null };
 
 function bdg(cls, text) {
   return `<span class="badge b-${cls||'neutral'}">${esc(String(text))}</span>`;
@@ -294,6 +331,7 @@ function rCard(p, type) {
     : `<div style="margin-top:10px;font-size:11px;color:var(--text3)">Closing line not captured yet — open emBET again before this game starts to track it.</div>`;
   const days     = daysUntil(p.commenceTime);
   const daysTxt  = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days} days away`;
+  const kStake   = st.bankroll ? kellyStake(p.fairProb, p.line, st.bankroll) : null;
 
   return `
   <div class="${isNear ? 'near-card' : 'future-card'}">
@@ -314,7 +352,7 @@ function rCard(p, type) {
         <div class="lbl" style="margin-top:3px;margin-bottom:0">edge</div>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:10px 12px;background:var(--bg);border-radius:6px">
+    <div style="display:grid;grid-template-columns:${kStake!=null ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr'};gap:10px;padding:10px 12px;background:var(--bg);border-radius:6px">
       <div>
         <span class="lbl">Book</span>
         <div style="font-size:15px;font-weight:500">${esc(p.book)}</div>
@@ -327,7 +365,13 @@ function rCard(p, type) {
         <span class="lbl">Fair value</span>
         <div class="mono" style="font-size:15px;color:var(--text2)">${fO(p.fairOdds)}</div>
       </div>
+      ${kStake!=null ? `
+      <div>
+        <span class="lbl">Stake (¼-Kelly)</span>
+        <div class="mono" style="font-size:15px;font-weight:500">$${kStake.toFixed(0)}</div>
+      </div>` : ''}
     </div>
+    ${kStake==null ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">No bankroll set — <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">tap to enable stake-sizing suggestions</span></div>` : ''}
     ${resBadge}
     ${clvLine}
   </div>`;
@@ -376,7 +420,7 @@ function render() {
 
   // Settle modal
   if (st.settleId) {
-    const p = [st.picks?.near, st.picks?.future, ...st.pending, ...st.history].find(x => x && x.id === st.settleId);
+    const p = [...(st.picks?.near||[]), ...(st.picks?.future||[]), ...st.pending, ...st.history].find(x => x && x.id === st.settleId);
     if (!p) { st.settleId = null; render(); return; }
     const cur = getRes(p.id) || '';
     app.innerHTML = `
@@ -412,7 +456,10 @@ function render() {
   const hasPF  = (W+L+P) > 0;
   const pColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
   const clvSet = [...st.pending, ...st.history].filter(p => p.closingLine != null);
-  const avgClv = clvSet.length ? clvSet.reduce((s,p) => s + cCLV(p.line, p.closingLine), 0) / clvSet.length : null;
+  const clvValues = clvSet.map(p => cCLV(p.line, p.closingLine));
+  const avgClv = clvValues.length ? clvValues.reduce((a,b) => a+b, 0) / clvValues.length : null;
+  const clvSd  = avgClv != null ? stdev(clvValues, avgClv) : null;
+  const clvSE  = (clvSd != null && clvValues.length > 1) ? clvSd / Math.sqrt(clvValues.length) : null;
 
   // History — pending (unsettled, possibly spanning many days) + settled
   const allHist = [...st.pending, ...st.history]
@@ -452,7 +499,7 @@ function render() {
     ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">emBET requires direct network access to the-odds-api.com. If you're inside Claude's viewer, download the file and open it in your browser—or host it on GitHub Pages for a permanent shareable link.</div>`
     : '';
 
-  const hasPicks = st.picks?.near || st.picks?.future;
+  const hasPicks = (st.picks?.near?.length || 0) > 0 || (st.picks?.future?.length || 0) > 0;
   const refreshing = st.loading && !!st.picks; // background rescan in progress while old picks are still on screen
 
   app.innerHTML = `
@@ -464,10 +511,15 @@ function render() {
       <button class="btn" style="font-size:11px;padding:3px 9px" onclick="EL.changeKey()">Change key</button>
     </div>
   </div>
-  <div style="font-size:12px;color:var(--text3);margin-bottom:22px;min-height:18px">
+  <div style="font-size:12px;color:var(--text3);margin-bottom:4px;min-height:18px">
     ${st.picks
       ? `Scanned at ${new Date(st.picks.generatedAt).toLocaleTimeString()} &middot; ${st.picks.total} EV+ plays found${refreshing?' &middot; rescanning for newer lines&hellip;':''}`
       : st.loading ? 'Scanning active lines&hellip;' : ''}
+  </div>
+  <div style="font-size:11px;color:var(--text3);margin-bottom:22px">
+    ${st.bankroll
+      ? `Bankroll: $${st.bankroll.toLocaleString()} &middot; <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">edit</span>`
+      : `No bankroll set &middot; <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">set one for stake-sizing suggestions</span>`}
   </div>
 
   ${st.err ? `
@@ -492,13 +544,13 @@ function render() {
   </div>` : ''}
 
   ${hasPicks ? `<div class="section-divider">Bet within 3 days</div>` : ''}
-  ${st.picks?.near
-    ? rCard(st.picks.near, 'near')
+  ${(st.picks?.near?.length || 0) > 0
+    ? st.picks.near.map(p => rCard(p, 'near')).join('')
     : hasPicks ? `<div class="empty-window">No EV+ plays found for games in the next 72 hours.</div>` : ''}
 
   ${hasPicks ? `<div class="section-divider">Plan ahead — within 3 months</div>` : ''}
-  ${st.picks?.future
-    ? rCard(st.picks.future, 'future')
+  ${(st.picks?.future?.length || 0) > 0
+    ? st.picks.future.map(p => rCard(p, 'future')).join('')
     : hasPicks ? `<div class="empty-window">No EV+ plays found for games in the 3-month window.</div>` : ''}
 
   ${(st.picks?.flagged?.length || 0) > 0 ? `
@@ -514,7 +566,8 @@ function render() {
          <span class="mono" style="font-weight:500;color:${pColor}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span>
          <span style="color:var(--text2)"> at $${FLAT} flat</span>`
       : `<span style="color:var(--text2)">No results recorded yet. Use Pick history to settle each pick after games finish.</span>`}
-    ${avgClv != null ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">Avg CLV across ${clvSet.length} priced pick${clvSet.length===1?'':'s'}: <span class="mono" style="font-weight:500;color:${avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(avgClv)}</span> — the part of the record that isn't just variance.</div>` : ''}
+    ${avgClv != null ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">Avg CLV across ${clvSet.length} priced pick${clvSet.length===1?'':'s'}: <span class="mono" style="font-weight:500;color:${avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(avgClv)}${clvSE!=null?` ± ${(clvSE*1.96*100).toFixed(1)}pp (95% CI)`:''}</span> — the part of the record that isn't just variance.</div>` : ''}
+    <div style="margin-top:6px;font-size:11px;color:var(--text3)">${sampleNote(clvSet.length)}</div>
   </div>
 
   ${allHist.length > 0 ? `
@@ -552,8 +605,17 @@ window.EL = {
   closeSettle()   { st.settleId = null; render(); },
   toggleHist()    { st.showHist = !st.showHist; render(); },
   retry()         { st.err = ''; st.loading = true; render(); scan(); },
+  setBankroll() {
+    const input = window.prompt('Bankroll for stake-sizing suggestions ($) — used only to calculate the suggested stake shown on each pick, stored only in this browser:', st.bankroll || '');
+    if (input == null) return; // cancelled
+    const v = parseFloat(input);
+    if (!isFinite(v) || v <= 0) return;
+    st.bankroll = v;
+    LS.set('embet_bankroll', v);
+    render();
+  },
   async settle(id, result) {
-    const pick = [st.picks?.near, st.picks?.future, ...st.pending, ...st.history].find(p => p && p.id === id);
+    const pick = [...(st.picks?.near||[]), ...(st.picks?.future||[]), ...st.pending, ...st.history].find(p => p && p.id === id);
     if (!pick) return;
     const done = { ...pick, result, settledAt: new Date().toISOString() };
     const i    = st.history.findIndex(h => h.id === id);
@@ -747,9 +809,9 @@ async function scan() {
     const cut72h  = now + H72;
     const cut90d  = now + H90D;
 
-    // Best EV play within 72 hours (implausible edges excluded — see SANITY_EDGE)
+    // Best EV plays within 72 hours (implausible edges excluded — see SANITY_EDGE)
     const nearOpps   = opps.filter(o => !o.suspicious && new Date(o.commenceTime).getTime() <= cut72h);
-    // Best EV play between 72 hours and 90 days
+    // Best EV plays between 72 hours and 90 days
     const futureOpps = opps.filter(o => {
       if (o.suspicious) return false;
       const t = new Date(o.commenceTime).getTime();
@@ -760,11 +822,12 @@ async function scan() {
     // mismatch one) gets noticed quickly instead of silently disappearing.
     const flagged = opps.filter(o => o.suspicious).slice(0, 3);
 
-    const nearPick   = nearOpps[0]   ? { ...nearOpps[0],   horizon: 'near'   } : null;
-    const futurePick = futureOpps[0] ? { ...futureOpps[0], horizon: 'future' } : null;
-
-    const near   = mergePending(nearPick);
-    const future = mergePending(futurePick);
+    const near = nearOpps
+      .slice(0, TOP_N_PICKS)
+      .map(o => mergePending({ ...o, horizon: 'near' }));
+    const future = futureOpps
+      .slice(0, TOP_N_PICKS)
+      .map(o => mergePending({ ...o, horizon: 'future' }));
     LS.set('embet_pending', st.pending);
 
     const picks = {
@@ -795,6 +858,9 @@ function init() {
   const pend = LS.get('embet_pending');
   if (pend) st.pending = pend;
 
+  const br = LS.get('embet_bankroll');
+  if (br) st.bankroll = br;
+
   const savedKey = LS.get('embet_ak');
   if (savedKey) {
     AK          = savedKey;
@@ -808,9 +874,13 @@ function init() {
   }
 
   const cached = LS.get('embet_picks_' + today());
-  // Validate cache is new near/future format — old builds stored primary/alternate
+  // Validate cache is new near/future format — old builds stored primary/alternate.
+  // Even within the near/future format, earlier versions stored near/future as a
+  // single object (or null) rather than an array — normalize that here so a
+  // cache left over from before this change doesn't break the new rendering.
   if (cached && 'near' in cached) {
-    st.picks   = cached;
+    const toArr = v => Array.isArray(v) ? v : (v ? [v] : []);
+    st.picks = { ...cached, near: toArr(cached.near), future: toArr(cached.future), flagged: cached.flagged || [] };
     st.loading = false;
     const age  = Date.now() - new Date(cached.generatedAt).getTime();
     if (age > STALE_MS) {
