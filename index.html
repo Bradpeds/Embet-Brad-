@@ -197,6 +197,16 @@ const PRI = [
   'basketball_ncaab','basketball_wnba',
   'soccer_usa_mls','soccer_epl'
 ];
+// Sports where Pinnacle is genuinely deep and well-established as the sharp
+// reference. This is NOT the same list as PRI above (which is just scan
+// order) -- Pinnacle carries far less volume in college sports, WNBA, and
+// MLS than in the major pro leagues, so "Pinnacle says X" is a weaker
+// claim there even though the app still uses it as the best available
+// reference. Picks referencing Pinnacle outside this set get an explicit
+// caveat rather than being presented with the same confidence as an NFL line.
+const PINNACLE_DEEP = new Set([
+  'baseball_mlb','basketball_nba','icehockey_nhl','americanfootball_nfl','soccer_epl'
+]);
 
 // Math
 const tD  = o => o > 0 ? o/100+1 : 100/Math.abs(o)+1;
@@ -284,7 +294,7 @@ function robustProb(prices) {
 
 // Format
 const fO    = o => o == null ? '—' : o > 0 ? `+${o}` : `${o}`;
-const fE    = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(2)}%`;
+const fE    = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%`;
 const fCLV  = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
 const fDT   = iso => new Date(iso).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
 const fDate = iso => new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
@@ -306,7 +316,7 @@ const LS = {
 };
 
 // State
-const st = { loading:true, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false, bankroll:null };
+const st = { loading:true, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false, bankroll:null, quota:null };
 
 function bdg(cls, text) {
   return `<span class="badge b-${cls||'neutral'}">${esc(String(text))}</span>`;
@@ -340,7 +350,7 @@ function rCard(p, type) {
         <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px">
           ${bdg('neutral', p.sport)}
           ${bdg('neutral', p.mkt)}
-          ${bdg(p.sharp ? 'info' : 'warning', p.sharp ? 'Pinnacle ref' : 'Consensus')}
+          ${bdg(p.sharp ? 'info' : 'warning', p.sharp ? (p.pinnacleDeep ? 'Pinnacle ref' : 'Pinnacle (thin mkt)') : 'Consensus')}
           ${bdg('neutral', daysTxt)}
         </div>
         <div style="font-size:18px;font-weight:500;margin-bottom:3px">${esc(p.bet)}</div>
@@ -371,6 +381,7 @@ function rCard(p, type) {
         <div class="mono" style="font-size:15px;font-weight:500">$${kStake.toFixed(0)}</div>
       </div>` : ''}
     </div>
+    ${(p.sharp && !p.pinnacleDeep) ? `<div style="margin-top:8px;font-size:11px;color:var(--amber)">Pinnacle is the reference here, but it carries much less volume in ${esc(p.sport)} than in the major pro leagues — treat "fair value" as a rougher anchor, not a precise probability.</div>` : ''}
     ${kStake==null ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">No bankroll set — <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">tap to enable stake-sizing suggestions</span></div>` : ''}
     ${resBadge}
     ${clvLine}
@@ -516,11 +527,15 @@ function render() {
       ? `Scanned at ${new Date(st.picks.generatedAt).toLocaleTimeString()} &middot; ${st.picks.total} EV+ plays found${refreshing?' &middot; rescanning for newer lines&hellip;':''}`
       : st.loading ? 'Scanning active lines&hellip;' : ''}
   </div>
-  <div style="font-size:11px;color:var(--text3);margin-bottom:22px">
+  <div style="font-size:11px;color:var(--text3);margin-bottom:4px">
     ${st.bankroll
       ? `Bankroll: $${st.bankroll.toLocaleString()} &middot; <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">edit</span>`
       : `No bankroll set &middot; <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">set one for stake-sizing suggestions</span>`}
   </div>
+  ${st.quota?.remaining != null ? `
+  <div style="font-size:11px;color:var(--text3);margin-bottom:22px">
+    API quota: ${st.quota.remaining.toLocaleString()} requests left this period${st.quota.remaining < 50 ? ' — getting low' : ''}
+  </div>` : `<div style="margin-bottom:22px"></div>`}
 
   ${st.err ? `
   <div style="background:var(--red-bg);color:var(--red);border:0.5px solid var(--red-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
@@ -662,11 +677,27 @@ function mergePending(pick) {
   return pick;
 }
 
+// Update tracked quota usage from whatever the Odds API actually reports.
+// Beats guessing from request counts -- this is the real number, straight
+// from the API's own rate-limit headers, on every response.
+function trackQuota(res) {
+  const remaining = res.headers.get('x-requests-remaining');
+  const used       = res.headers.get('x-requests-used');
+  if (remaining == null && used == null) return;
+  st.quota = {
+    remaining: remaining != null ? parseInt(remaining, 10) : st.quota?.remaining ?? null,
+    used:      used != null      ? parseInt(used, 10)      : st.quota?.used ?? null,
+    at: new Date().toISOString()
+  };
+  LS.set('embet_quota', st.quota);
+}
+
 // Scan the Odds API
 async function scan() {
   try {
     const sRes = await fetch(`${OB}/sports/?apiKey=${AK}`);
     if (!sRes.ok) throw new Error(`Sports list error ${sRes.status}. Check the API key.`);
+    trackQuota(sRes);
     const allSports = await sRes.json();
 
     const active = allSports.filter(s => s.active && !s.has_outrights);
@@ -686,6 +717,7 @@ async function scan() {
       url.searchParams.set('bookmakers',  BKS);
 
       const res = await fetch(url.toString());
+      trackQuota(res);
       if (!res.ok) {
         if (res.status === 429) throw new Error('API quota reached for this period.');
         continue;
@@ -789,6 +821,7 @@ async function scan() {
                 fairProb:     fair,
                 edge,
                 sharp:        sharpRef,
+                pinnacleDeep: PINNACLE_DEEP.has(sport),
                 suspicious:   edge > SANITY_EDGE,
                 closingLine:  null,
                 closingAt:    null,
@@ -860,6 +893,9 @@ function init() {
 
   const br = LS.get('embet_bankroll');
   if (br) st.bankroll = br;
+
+  const q = LS.get('embet_quota');
+  if (q) st.quota = q;
 
   const savedKey = LS.get('embet_ak');
   if (savedKey) {
