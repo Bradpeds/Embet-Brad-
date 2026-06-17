@@ -184,13 +184,20 @@ const H72    = 72  * 60 * 60 * 1000;   // 3 days in ms
 const H90D   = 90  * 24 * 60 * 60 * 1000; // 90 days in ms
 const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours — cached picks older than this trigger an automatic background rescan on load instead of sitting stale for the rest of the day. Raise this (or remove the auto-rescan call in init()) if you're tight on the free-tier 500/month request quota — each scan costs ~9 requests.
 const MIN_CB = 3;   // min book quotes per side before trusting a consensus fair line
-const MIN_EDGE = 0.015; // min modeled edge (1.5%) before a play is worth surfacing — below this, it's more likely de-vig noise or a stale line than a repeatable advantage
+// --- User-adjustable settings (defaults below; live values come from st.settings) ---
+const DEFAULT_MIN_EDGE   = 0.015; // min modeled edge before a play is surfaced. 1.5% is permissive — stale data, feed latency, and mid-day line movement can each be larger than that, so a low floor surfaces more marginal plays. Raising it (2–2.5%) demands a bigger modeled edge before a pick counts, trading volume for an attempt at higher average quality. There's no "correct" value; it's a risk/volume dial, which is why it's adjustable rather than baked in.
+const DEFAULT_TOP_N      = 3;     // how many of the best-EV plays to surface per time window (near / future), ranked by edge. More picks captures more of a day's total expected value but means more bets to track and more variance per day. Doesn't cost extra API calls — every opportunity is already fetched in one scan regardless of how many get shown.
+const MIN_EDGE_FLOOR = 0.005, MIN_EDGE_CEIL = 0.05; // guardrails on the adjustable edge threshold
+const TOP_N_FLOOR = 1, TOP_N_CEIL = 20;             // guardrails on picks-per-window
 const SANITY_EDGE = 0.20; // real sharp-vs-soft mispricings essentially never exceed ~20%. Anything above this is far more likely a data/matching issue (e.g. mismatched lines, a stale quote) than a genuine opportunity — those get pulled out of the main picks and flagged separately instead of being presented as something to bet.
-const TOP_N_PICKS = 3; // how many of the best-EV plays to surface per time window (near / future), ranked by edge, instead of just the single best one. More picks captures more of a day's total expected value, but also means more bets to track and more variance per day -- a deliberate volume/discipline tradeoff, not a free win. This doesn't cost extra API calls: every opportunity is already fetched in one scan regardless of how many get shown.
 const KELLY_FRACTION = 0.25; // quarter-Kelly. Full Kelly assumes the edge estimate is exactly right -- with one sharp reference book and a de-vig model, it usually isn't exactly right, and full Kelly is brutal on bankroll when the edge is overestimated. A quarter (sometimes half) of full Kelly is the standard real-world haircut for that uncertainty.
 const SAMPLE_EARLY       = 30;  // below this, results are close to pure noise
 const SAMPLE_DEVELOPING  = 100; // below this, treat any trend as provisional
 const SAMPLE_MEANINGFUL  = 250; // the reviewer's own bar for an ROI conclusion to mean something
+const CLAMP = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+// Live setting accessors — read from state, fall back to defaults.
+const minEdge = () => st.settings?.minEdge ?? DEFAULT_MIN_EDGE;
+const topN    = () => st.settings?.topN    ?? DEFAULT_TOP_N;
 const PRI = [
   'baseball_mlb','basketball_nba','icehockey_nhl',
   'americanfootball_nfl','americanfootball_ncaaf',
@@ -316,7 +323,7 @@ const LS = {
 };
 
 // State
-const st = { loading:true, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false, bankroll:null, quota:null };
+const st = { loading:true, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false, bankroll:null, settings:{}, showSettings:false };
 
 function bdg(cls, text) {
   return `<span class="badge b-${cls||'neutral'}">${esc(String(text))}</span>`;
@@ -397,6 +404,60 @@ function flagCard(o) {
     </div>
     <div style="color:var(--text2);font-size:12px">${esc(o.game)} &middot; ${esc(o.sport)} &middot; ${esc(o.mkt)}</div>
     <div style="color:var(--text2);font-size:12px;margin-top:6px">Edge exceeds the ${(SANITY_EDGE*100).toFixed(0)}% sanity cap — real sharp-vs-soft mispricings essentially never get this large. Treat this as a possible data issue, not a play, until checked manually against the actual book.</div>
+  </div>`;
+}
+
+// Calibration table — the core validation tool. Groups every pick that has
+// BOTH a modeled edge and a captured closing line into edge buckets, then
+// shows average CLV within each bucket. The question it answers: when the
+// model says "+3% edge," does that bet actually beat the close more than a
+// "+1.5% edge" bet does? If avg CLV rises with edge bucket, the edge
+// estimates are calibrated and mean something. If it's flat or random, the
+// edge number is decorative and the app is just line-shopping. This needs
+// real tracked history to say anything, so it fills in gradually.
+const EDGE_BUCKETS = [
+  { lo: 0.015, hi: 0.025, label: '1.5–2.5%' },
+  { lo: 0.025, hi: 0.05,  label: '2.5–5%'   },
+  { lo: 0.05,  hi: 0.10,  label: '5–10%'    },
+  { lo: 0.10,  hi: Infinity, label: '>10%'  }
+];
+function calibrationRows() {
+  const tracked = [...st.pending, ...st.history]
+    .filter(p => p.closingLine != null && typeof p.edge === 'number');
+  return EDGE_BUCKETS.map(b => {
+    const inB = tracked.filter(p => p.edge >= b.lo && p.edge < b.hi);
+    const clvs = inB.map(p => cCLV(p.line, p.closingLine));
+    const avg  = clvs.length ? clvs.reduce((a,c)=>a+c,0) / clvs.length : null;
+    return { label: b.label, n: inB.length, avgClv: avg };
+  });
+}
+function calibrationCard() {
+  const rows = calibrationRows();
+  const totalN = rows.reduce((s,r)=>s+r.n,0);
+  const body = rows.map(r => `
+    <tr>
+      <td style="font-size:12px">${r.label}</td>
+      <td style="font-size:12px;color:var(--text2);text-align:center">${r.n || '—'}</td>
+      <td style="text-align:right">${
+        r.avgClv != null
+          ? `<span class="mono" style="font-size:12px;font-weight:500;color:${r.avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(r.avgClv)}</span>`
+          : `<span style="font-size:12px;color:var(--text3)">—</span>`
+      }</td>
+    </tr>`).join('');
+  return `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:14px 16px 10px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Edge calibration</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6">Average CLV by modeled-edge bucket. If CLV rises as the edge bucket rises, the edge estimates are tracking something real. Flat or negative means the edge number isn't predictive yet. ${totalN < 20 ? `Only ${totalN} tracked so far — this needs a few hundred to read clearly.` : ''}</div>
+    </div>
+    <table class="tbl"><tbody>
+      <tr style="color:var(--text3)">
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase">Edge bucket</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:center">N</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:right">Avg CLV</td>
+      </tr>
+      ${body}
+    </tbody></table>
   </div>`;
 }
 
@@ -519,6 +580,7 @@ function render() {
     <div style="display:flex;align-items:center;gap:12px">
       <div style="font-size:12px;color:var(--text2)">${new Date().toLocaleDateString('en-US',{weekday:'short',month:'long',day:'numeric',year:'numeric'})}</div>
       <button class="btn" style="font-size:11px;padding:3px 9px" ${refreshing?'disabled':''} onclick="EL.retry()">${refreshing?'Rescanning…':'Rescan'}</button>
+      <button class="btn" style="font-size:11px;padding:3px 9px" onclick="EL.toggleSettings()">${st.showSettings?'Close':'Settings'}</button>
       <button class="btn" style="font-size:11px;padding:3px 9px" onclick="EL.changeKey()">Change key</button>
     </div>
   </div>
@@ -532,10 +594,36 @@ function render() {
       ? `Bankroll: $${st.bankroll.toLocaleString()} &middot; <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">edit</span>`
       : `No bankroll set &middot; <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">set one for stake-sizing suggestions</span>`}
   </div>
-  ${st.quota?.remaining != null ? `
   <div style="font-size:11px;color:var(--text3);margin-bottom:22px">
-    API quota: ${st.quota.remaining.toLocaleString()} requests left this period${st.quota.remaining < 50 ? ' — getting low' : ''}
-  </div>` : `<div style="margin-bottom:22px"></div>`}
+    <a href="https://the-odds-api.com/account/" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">Check API usage on your account page</a> — the API doesn't expose live quota numbers to a page running in a browser like this one.
+  </div>
+
+  ${st.showSettings ? `
+  <div class="card" style="margin-bottom:14px">
+    <div style="font-weight:500;font-size:14px;margin-bottom:14px">Settings</div>
+
+    <div style="margin-bottom:18px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-size:13px;font-weight:500">Minimum edge</span>
+        <span class="mono" style="font-size:13px;color:var(--accent)">${(minEdge()*100).toFixed(1)}%</span>
+      </div>
+      <input type="range" min="${MIN_EDGE_FLOOR*1000}" max="${MIN_EDGE_CEIL*1000}" step="1" value="${Math.round(minEdge()*1000)}"
+        style="width:100%" oninput="EL.previewSetting('minEdge', this.value/1000)" onchange="EL.saveSetting('minEdge', this.value/1000)"/>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">How big a modeled edge a play needs before it's surfaced. Lower = more plays, more marginal. Higher = fewer, higher-conviction. There's no provably correct value — it's a volume-vs-quality dial. Default 1.5%.</div>
+    </div>
+
+    <div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-size:13px;font-weight:500">Picks per window</span>
+        <span class="mono" style="font-size:13px;color:var(--accent)">${topN()}</span>
+      </div>
+      <input type="range" min="${TOP_N_FLOOR}" max="${TOP_N_CEIL}" step="1" value="${topN()}"
+        style="width:100%" oninput="EL.previewSetting('topN', parseInt(this.value,10))" onchange="EL.saveSetting('topN', parseInt(this.value,10))"/>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">How many top plays to show in each window (near / future). More picks = more of the day's total EV captured, but more bets to track and more day-to-day variance. Doesn't use extra API calls. Default 3.</div>
+    </div>
+
+    <div style="margin-top:16px;font-size:11px;color:var(--text3)">Both settings take effect on the next rescan. Picks-per-window is capped during the scan, so raising it shows more plays only after rescanning — that keeps your tracked record from retroactively gaining bets you never saw. <button class="btn" style="font-size:11px;padding:3px 10px;margin-left:6px" onclick="EL.retry()">Rescan now</button></div>
+  </div>` : ''}
 
   ${st.err ? `
   <div style="background:var(--red-bg);color:var(--red);border:0.5px solid var(--red-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
@@ -554,7 +642,7 @@ function render() {
   ${!st.loading && !hasPicks && !st.err ? `
   <div style="text-align:center;padding:80px 0;color:var(--text2)">
     <div style="font-size:15px;font-weight:500;color:var(--text);margin-bottom:8px">No plays found</div>
-    <div style="font-size:13px;margin-bottom:16px">No EV+ opportunities at or above the ${(MIN_EDGE*100).toFixed(1)}% edge floor as of the last scan${st.picks?` (${new Date(st.picks.generatedAt).toLocaleTimeString()})`:''}. Lines move throughout the day, so this can change without you doing anything — rescan to check the current board.</div>
+    <div style="font-size:13px;margin-bottom:16px">No EV+ opportunities at or above the ${(minEdge()*100).toFixed(1)}% edge floor as of the last scan${st.picks?` (${new Date(st.picks.generatedAt).toLocaleTimeString()})`:''}. Lines move throughout the day, so this can change without you doing anything — rescan to check the current board.</div>
     <button class="btn" onclick="EL.retry()">Rescan now</button>
   </div>` : ''}
 
@@ -584,6 +672,8 @@ function render() {
     ${avgClv != null ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">Avg CLV across ${clvSet.length} priced pick${clvSet.length===1?'':'s'}: <span class="mono" style="font-weight:500;color:${avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(avgClv)}${clvSE!=null?` ± ${(clvSE*1.96*100).toFixed(1)}pp (95% CI)`:''}</span> — the part of the record that isn't just variance.</div>` : ''}
     <div style="margin-top:6px;font-size:11px;color:var(--text3)">${sampleNote(clvSet.length)}</div>
   </div>
+
+  ${clvSet.length > 0 ? calibrationCard() : ''}
 
   ${allHist.length > 0 ? `
   <div class="card" style="padding:0;overflow:hidden">
@@ -619,6 +709,17 @@ window.EL = {
   openSettle(id)  { st.settleId = id; render(); },
   closeSettle()   { st.settleId = null; render(); },
   toggleHist()    { st.showHist = !st.showHist; render(); },
+  toggleSettings(){ st.showSettings = !st.showSettings; render(); },
+  previewSetting(key, val) {
+    // Keep state in sync while the slider is being dragged. The number label
+    // updates on the next full render (fired by saveSetting on release).
+    st.settings = { ...st.settings, [key]: val };
+  },
+  saveSetting(key, val) {
+    st.settings = { ...st.settings, [key]: val };
+    LS.set('embet_settings', st.settings);
+    render();
+  },
   retry()         { st.err = ''; st.loading = true; render(); scan(); },
   setBankroll() {
     const input = window.prompt('Bankroll for stake-sizing suggestions ($) — used only to calculate the suggested stake shown on each pick, stored only in this browser:', st.bankroll || '');
@@ -677,27 +778,11 @@ function mergePending(pick) {
   return pick;
 }
 
-// Update tracked quota usage from whatever the Odds API actually reports.
-// Beats guessing from request counts -- this is the real number, straight
-// from the API's own rate-limit headers, on every response.
-function trackQuota(res) {
-  const remaining = res.headers.get('x-requests-remaining');
-  const used       = res.headers.get('x-requests-used');
-  if (remaining == null && used == null) return;
-  st.quota = {
-    remaining: remaining != null ? parseInt(remaining, 10) : st.quota?.remaining ?? null,
-    used:      used != null      ? parseInt(used, 10)      : st.quota?.used ?? null,
-    at: new Date().toISOString()
-  };
-  LS.set('embet_quota', st.quota);
-}
-
 // Scan the Odds API
 async function scan() {
   try {
     const sRes = await fetch(`${OB}/sports/?apiKey=${AK}`);
     if (!sRes.ok) throw new Error(`Sports list error ${sRes.status}. Check the API key.`);
-    trackQuota(sRes);
     const allSports = await sRes.json();
 
     const active = allSports.filter(s => s.active && !s.has_outrights);
@@ -717,7 +802,6 @@ async function scan() {
       url.searchParams.set('bookmakers',  BKS);
 
       const res = await fetch(url.toString());
-      trackQuota(res);
       if (!res.ok) {
         if (res.status === 429) throw new Error('API quota reached for this period.');
         continue;
@@ -802,7 +886,7 @@ async function scan() {
               const fair = fm[oKey(o.name, o.point)];
               if (fair == null) continue; // this book's number doesn't match the line we have a fair price for — skip rather than guess
               const edge = cEV(fair, o.price);
-              if (edge <= MIN_EDGE) continue;
+              if (edge <= minEdge()) continue;
 
               const mktLbl = mkt === 'h2h' ? 'ML' : mkt === 'spreads' ? 'Spread' : 'Total';
               const pt     = o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : '';
@@ -856,10 +940,10 @@ async function scan() {
     const flagged = opps.filter(o => o.suspicious).slice(0, 3);
 
     const near = nearOpps
-      .slice(0, TOP_N_PICKS)
+      .slice(0, topN())
       .map(o => mergePending({ ...o, horizon: 'near' }));
     const future = futureOpps
-      .slice(0, TOP_N_PICKS)
+      .slice(0, topN())
       .map(o => mergePending({ ...o, horizon: 'future' }));
     LS.set('embet_pending', st.pending);
 
@@ -894,8 +978,8 @@ function init() {
   const br = LS.get('embet_bankroll');
   if (br) st.bankroll = br;
 
-  const q = LS.get('embet_quota');
-  if (q) st.quota = q;
+  const settings = LS.get('embet_settings');
+  if (settings) st.settings = settings;
 
   const savedKey = LS.get('embet_ak');
   if (savedKey) {
