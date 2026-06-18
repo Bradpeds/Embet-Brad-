@@ -357,6 +357,8 @@ function confidenceLabel(c) {
 }
 
 
+// Format
+const fO    = o => o == null ? '—' : o > 0 ? `+${o}` : `${o}`;
 const fE    = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%`;
 const fCLV  = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
 const fDT   = iso => new Date(iso).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
