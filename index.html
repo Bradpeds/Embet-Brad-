@@ -299,8 +299,64 @@ function robustProb(prices) {
   return kept.reduce((a,b)=>a+b,0) / kept.length;
 }
 
-// Format
-const fO    = o => o == null ? '—' : o > 0 ? `+${o}` : `${o}`;
+// --- Quantitative confidence (Layer 3, computable half) ---
+// Per the architecture spec, confidence answers a DIFFERENT question from edge:
+// not "how big is the gap" but "how much should we trust that this gap is real
+// rather than a data artifact or a stale/thin quote." It is deliberately NOT
+// part of the edge math -- it never changes the edge number, it sits beside it.
+//
+// This is the *quantitative* axis only (Wil's term): everything here is computed
+// from data the scan already holds. The *contextual* axis (injuries, line
+// movement, weather) needs live web data and a backend, and is intentionally
+// absent rather than faked. The score below should be read as "how structurally
+// trustworthy is this price disagreement," not "how likely is this bet to win."
+//
+// Four bounded sub-scores in [0,1], then a weighted blend:
+//   depth      -- more books quoting this exact side = a more reliable consensus
+//   agreement  -- lower price dispersion across books = the market is settled here
+//   reference  -- Pinnacle present and deep > Pinnacle thin > soft-only consensus
+//   pinAlign   -- when Pinnacle exists, how closely the broader market agrees with it
+// Anything we can't yet measure (historical book-vs-book hit rate, line movement)
+// is simply not in the blend. No invented inputs.
+function quantConfidence(o) {
+  const m = o.confMeta || {};
+  // depth: saturates around 8 books. 3 books (the minimum) is weak; 8+ is full.
+  const depth = m.nBooks != null ? CLAMP((m.nBooks - 2) / 6, 0, 1) : 0.3;
+  // agreement: dispersion of implied prob across books. ~0 = perfect agreement,
+  // 0.04 (4 percentage points of stdev) or more = noisy. Inverted to a [0,1] score.
+  const agreement = m.disp != null ? CLAMP(1 - (m.disp / 0.04), 0, 1) : 0.5;
+  // reference quality: sharp book beats consensus; deep sharp book beats thin.
+  const reference = o.sharp ? (o.pinnacleDeep ? 1.0 : 0.7) : 0.5;
+  // pinAlign: only meaningful when Pinnacle exists. |consensus fair - pin implied|.
+  // If the broader market sits right on Pinnacle, alignment is high. Soft-only
+  // picks get a neutral 0.5 here since there's no sharp anchor to align to.
+  let pinAlign = 0.5;
+  if (m.pinProb != null && o.fairProb != null) {
+    pinAlign = CLAMP(1 - (Math.abs(o.fairProb - m.pinProb) / 0.05), 0, 1);
+  }
+  // Weighted blend. Reference quality and agreement matter most -- a sharp,
+  // settled line is the strongest structural signal; raw book count least.
+  const score = 0.30*reference + 0.30*agreement + 0.25*pinAlign + 0.15*depth;
+  return { score: CLAMP(score, 0, 1), depth, agreement, reference, pinAlign };
+}
+// Map a [0,1] confidence score to a label + the dominant reason, so the UI can
+// explain itself the way Update 5 asks ("selected because market agreement is
+// stronger..."). The reason names the highest and lowest contributing factors.
+function confidenceLabel(c) {
+  const s = c.score;
+  const tier = s >= 0.75 ? 'High' : s >= 0.5 ? 'Moderate' : s >= 0.3 ? 'Low' : 'Very low';
+  const parts = [
+    { k: 'reference', good: 'sharp Pinnacle reference', bad: 'soft-book-only consensus (no sharp anchor)' },
+    { k: 'agreement', good: 'books closely agree on the price', bad: 'books disagree widely on the price' },
+    { k: 'pinAlign',  good: 'consensus aligns with Pinnacle', bad: 'consensus diverges from Pinnacle' },
+    { k: 'depth',     good: 'many books in the pool', bad: 'only a few books quoting' }
+  ];
+  const ranked = parts.map(p => ({ ...p, v: c[p.k] })).sort((a,b) => b.v - a.v);
+  const strongest = ranked[0], weakest = ranked[ranked.length - 1];
+  return { tier, strongest: strongest.v >= 0.6 ? strongest.good : null, weakest: weakest.v < 0.5 ? weakest.bad : null };
+}
+
+
 const fE    = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%`;
 const fCLV  = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
 const fDT   = iso => new Date(iso).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
@@ -331,7 +387,7 @@ function bdg(cls, text) {
 function getRes(id) { return st.history.find(h=>h.id===id)?.result||null; }
 
 // Pick card — type is 'near' or 'future'
-function rCard(p, type) {
+function rCard(p, type, isTop) {
   if (!p) return '';
   const isNear   = type === 'near';
   const res      = getRes(p.id);
@@ -349,12 +405,18 @@ function rCard(p, type) {
   const days     = daysUntil(p.commenceTime);
   const daysTxt  = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days} days away`;
   const kStake   = st.bankroll ? kellyStake(p.fairProb, p.line, st.bankroll) : null;
+  // Confidence is recomputed from the stored confMeta so it survives reloads
+  // and stays consistent with whatever the latest scoring logic is.
+  const conf     = p.confMeta ? quantConfidence(p) : null;
+  const confLbl  = conf ? confidenceLabel(conf) : null;
+  const confColor = conf ? (conf.score >= 0.75 ? 'var(--green)' : conf.score >= 0.5 ? 'var(--amber)' : 'var(--text2)') : 'var(--text2)';
 
   return `
   <div class="${isNear ? 'near-card' : 'future-card'}">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
       <div style="flex:1;min-width:0">
         <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px">
+          ${isTop ? `<span class="badge" style="background:var(--green-bg);color:var(--green);border:0.5px solid var(--green-border);font-weight:600">★ Top pick</span>` : ''}
           ${bdg('neutral', p.sport)}
           ${bdg('neutral', p.mkt)}
           ${bdg(p.sharp ? 'info' : 'warning', p.sharp ? (p.pinnacleDeep ? 'Pinnacle ref' : 'Pinnacle (thin mkt)') : 'Consensus')}
@@ -367,8 +429,14 @@ function rCard(p, type) {
       <div style="text-align:right;flex-shrink:0">
         <div class="mono" style="font-size:30px;font-weight:500;color:var(--green);line-height:1">${fE(p.edge)}</div>
         <div class="lbl" style="margin-top:3px;margin-bottom:0">edge</div>
+        ${conf ? `<div style="margin-top:8px"><span class="mono" style="font-size:15px;font-weight:500;color:${confColor}">${confLbl.tier}</span><div class="lbl" style="margin-top:1px;margin-bottom:0">confidence</div></div>` : ''}
       </div>
     </div>
+    ${conf ? `<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg);border-radius:6px;font-size:11px;color:var(--text2);line-height:1.6">
+      <span style="color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-size:10px">Why this confidence</span><br>
+      ${confLbl.strongest ? `Supporting: ${confLbl.strongest}.` : ''}${confLbl.weakest ? ` Caution: ${confLbl.weakest}.` : ''}${(!confLbl.strongest && !confLbl.weakest) ? 'Middling on every structural signal — no strong support or clear red flag.' : ''}
+      <span style="color:var(--text3)"> Structural trust only — does not account for injuries, lineups, or line movement.</span>
+    </div>` : ''}
     <div style="display:grid;grid-template-columns:${kStake!=null ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr'};gap:10px;padding:10px 12px;background:var(--bg);border-radius:6px">
       <div>
         <span class="lbl">Book</span>
@@ -681,7 +749,7 @@ function render() {
 
   ${hasPicks ? `<div class="section-divider">Bet within 3 days</div>` : ''}
   ${(st.picks?.near?.length || 0) > 0
-    ? st.picks.near.map(p => rCard(p, 'near')).join('')
+    ? st.picks.near.map((p, i) => rCard(p, 'near', i === 0)).join('')
     : hasPicks ? `<div class="empty-window">No plays with an edge for games in the next 72 hours.</div>` : ''}
 
   ${hasPicks ? `<div class="section-divider">Further out — as far as books are posting</div>` : ''}
@@ -895,12 +963,38 @@ async function scan() {
         for (const mkt of ['h2h', 'spreads', 'totals']) {
           const pm = pin?.markets?.find(m => m.key === mkt);
           let fm = null, sharpRef = false;
+          // Per-outcome confidence inputs gathered while building the fair map:
+          //   nBooks  -> how many books quoted this exact side+point (pool depth)
+          //   pinDist -> |consensus implied prob - Pinnacle implied prob| when both exist
+          //              (how far the broader market sits from the sharp book; small = aligned)
+          //   disp    -> stdev of implied probs across books for this outcome (market agreement;
+          //              low = books agree, the price is "settled"; high = noisy/unreliable)
+          // These are computed from data the scan already has and are NOT part of the
+          // edge math -- they live only in the confidence layer, per the spec.
+          const meta = {}; // oKey -> { nBooks, disp, pinProb }
 
           if (pm?.outcomes?.length === 2) {
             const [a, b] = pm.outcomes;
             const [fa, fb] = shinProb(iP(a.price), iP(b.price));
             fm = { [oKey(a.name, a.point)]: fa, [oKey(b.name, b.point)]: fb };
             sharpRef = true;
+            // Pinnacle is the reference. Still gather how the soft books are
+            // dispersed around each side, and record Pinnacle's own implied
+            // prob so pinDist can be computed per book below.
+            for (const key of [oKey(a.name, a.point), oKey(b.name, b.point)]) {
+              const [nm, ptStr] = key.includes('|') ? key.split('|') : [key, null];
+              const ptVal = ptStr != null ? parseFloat(ptStr) : null;
+              const ips = [];
+              for (const bm of g.bookmakers) {
+                if (bm.key === 'pinnacle') continue;
+                const m2 = bm.markets?.find(m => m.key === mkt);
+                const o2 = m2?.outcomes?.find(o => oKey(o.name, o.point) === key);
+                if (o2 && o2.price != null) ips.push(iP(o2.price));
+              }
+              const mean = ips.length ? ips.reduce((s,x)=>s+x,0)/ips.length : null;
+              const disp = (ips.length >= 2 && mean != null) ? Math.sqrt(ips.reduce((s,x)=>s+(x-mean)**2,0)/(ips.length-1)) : null;
+              meta[key] = { nBooks: ips.length, disp, pinProb: key === oKey(a.name,a.point) ? iP(a.price) : iP(b.price) };
+            }
           } else {
             // No Pinnacle line — build a consensus, but only from books that
             // are quoting the exact same point. Group every outcome seen
@@ -938,6 +1032,15 @@ async function scan() {
                 if (pA != null && pB != null) {
                   const [sA, sB] = shinProb(pA, pB);
                   fm = { [k1]: sA, [k2]: sB };
+                  // Consensus-branch confidence inputs: pool depth and price
+                  // dispersion per side. No Pinnacle here, so pinProb stays null
+                  // (pinDist simply won't contribute to confidence on these).
+                  for (const key of [k1, k2]) {
+                    const ips = pools[key].prices.map(iP);
+                    const mean = ips.reduce((s,x)=>s+x,0)/ips.length;
+                    const disp = ips.length >= 2 ? Math.sqrt(ips.reduce((s,x)=>s+(x-mean)**2,0)/(ips.length-1)) : null;
+                    meta[key] = { nBooks: ips.length, disp, pinProb: null };
+                  }
                 }
               }
             }
@@ -959,7 +1062,8 @@ async function scan() {
               const mktLbl = mkt === 'h2h' ? 'ML' : mkt === 'spreads' ? 'Spread' : 'Total';
               const pt     = o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : '';
 
-              opps.push({
+              const oppKey = oKey(o.name, o.point);
+              const base = {
                 id:           uid(),
                 gameId:       g.id,
                 sport:        sportLbl,
@@ -975,20 +1079,31 @@ async function scan() {
                 sharp:        sharpRef,
                 pinnacleDeep: PINNACLE_DEEP.has(sport),
                 suspicious:   edge > SANITY_EDGE,
+                confMeta:     meta[oppKey] || { nBooks: null, disp: null, pinProb: null },
                 closingLine:  null,
                 closingAt:    null,
                 result:       null
-              });
+              };
+              base.confidence = quantConfidence(base).score;
+              opps.push(base);
             }
           }
         }
       }
     }
 
-    // Sort by EV (Pinnacle-referenced picks get a slight boost)
-    opps.sort((a, b) =>
-      (b.edge + (b.sharp ? 0.001 : 0)) - (a.edge + (a.sharp ? 0.001 : 0))
-    );
+    // Rank by a transparent blend of edge and confidence, per the architecture
+    // spec's core example: a +5 at high confidence should be able to outrank a
+    // +6 at low confidence. We scale edge into a roughly [0,1] band (capping at
+    // the 20% sanity edge) and blend 60/40 edge/confidence -- edge still leads,
+    // but confidence can reorder genuinely close calls and break ties. The
+    // displayed edge number is untouched; this only affects ordering/selection.
+    const rankScore = o => {
+      const edgeNorm = CLAMP(o.edge / SANITY_EDGE, 0, 1);
+      const c = (o.confidence != null) ? o.confidence : 0.5;
+      return 0.60*edgeNorm + 0.40*c;
+    };
+    opps.sort((a, b) => rankScore(b) - rankScore(a));
 
     const now     = Date.now();
     const cut72h  = now + H72;
