@@ -1,0 +1,1542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>emBET</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#f6f6f6;--sf:#fff;--bd:rgba(0,0,0,.08);--bdm:rgba(0,0,0,.14);
+      --t:#000;--t2:#545454;--t3:#8a8a8a;
+      --ac:#e8385c;--acbg:#fdebef;--acbd:rgba(232,56,92,.3);
+      --gr:#0891b2;--grbg:#e3f6fa;--grbd:rgba(8,145,178,.3);
+      --re:#c4271f;--rebg:#fdecea;--rebd:rgba(196,39,31,.3);
+      --am:#b38600;--ambg:#fff3da;--ambd:rgba(179,134,0,.3);
+      --c-claude:#cc6a1e;--c-gpt:#d23838;--c-gemini:#0e9488;
+      --mono:'JetBrains Mono','Courier New',monospace;
+      --sans:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;
+      --r:14px;--r-sm:10px;--r-lg:20px;
+    }
+    @media(prefers-color-scheme:dark){:root{
+      --bg:#000;--sf:#161616;--bd:rgba(255,255,255,.1);--bdm:rgba(255,255,255,.18);
+      --t:#fff;--t2:#a8a8a8;--t3:#6e6e6e;
+      --ac:#ff6b87;--acbg:rgba(255,107,135,.14);--acbd:rgba(255,107,135,.35);
+      --gr:#2dd4ef;--grbg:rgba(45,212,239,.14);--grbd:rgba(45,212,239,.35);
+      --re:#ff6b5b;--rebg:rgba(255,107,91,.14);--rebd:rgba(255,107,91,.35);
+      --am:#ffd166;--ambg:rgba(255,209,102,.14);--ambd:rgba(255,209,102,.35);
+      --c-claude:#ff9d4d;--c-gpt:#ff5c5c;--c-gemini:#2dd9c4;
+    }}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:var(--sans);background:var(--bg);color:var(--t);font-size:16px;line-height:1.45;min-height:100vh;-webkit-font-smoothing:antialiased}
+    .wrap{max-width:600px;margin:0 auto;padding:28px 18px 80px}
+    .card{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:22px;margin-bottom:14px}
+    .hero{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:26px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+    .cand{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:18px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+    .divider{display:flex;align-items:center;gap:10px;margin:22px 0 14px;font-size:13px;font-weight:700;letter-spacing:.2px;color:var(--t3)}
+    .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--bd)}
+    .lbl{font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px}
+    .mono{font-family:var(--mono)}
+    .btn{background:var(--sf);border:1px solid var(--bdm);border-radius:999px;color:var(--t);padding:10px 18px;cursor:pointer;font-size:14px;font-weight:600;font-family:var(--sans);transition:transform .08s ease}
+    .btn:hover{background:var(--bg)}
+    .btn:active{transform:scale(.97)}
+    .btn-primary{background:var(--t);color:var(--sf);border:none}
+    .btn-primary:hover{opacity:.88;background:var(--t)}
+    .badge{display:inline-block;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+    .bn{background:var(--bg);color:var(--t2)}
+    .bi{background:var(--acbg);color:#048a4b}
+    .bs{background:var(--grbg);color:#048a4b}
+    .bd{background:var(--rebg);color:var(--re)}
+    .bw{background:var(--ambg);color:var(--am)}
+    .rbtn{flex:1;padding:14px 8px;border-radius:999px;cursor:pointer;font-size:14px;font-weight:700;border:1px solid var(--bdm);background:var(--sf);color:var(--t2);font-family:var(--sans);transition:transform .08s ease}
+    .rbtn:active{transform:scale(.97)}
+    .rbtn.W{background:var(--t);color:var(--sf);border-color:var(--t)}
+    .rbtn.L{background:var(--rebg);color:var(--re);border-color:var(--rebd)}
+    .rbtn.P{background:var(--ambg);color:var(--am);border-color:var(--ambd)}
+    .tbl{width:100%;border-collapse:collapse}
+    .tbl td,.tbl th{padding:11px 12px;border-bottom:1px solid var(--bd);vertical-align:middle}
+    .tbl th{font-size:11px;letter-spacing:.3px;text-transform:uppercase;color:var(--t3);font-weight:700;text-align:left;padding-top:12px}
+    .igrid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;padding:14px;background:var(--bg);border-radius:var(--r-sm);margin:16px 0}
+    .reasoning{background:var(--bg);border-radius:var(--r-sm);padding:16px;font-size:14px;color:var(--t);line-height:1.6;margin:14px 0 0}
+    .ai-loading{background:var(--bg);border-radius:var(--r-sm);padding:12px 16px;font-size:13px;color:var(--t3);margin-top:12px;font-weight:600}
+    .rank-num{font-size:22px;font-weight:800;color:var(--t3);flex-shrink:0;width:30px;padding-top:1px}
+    .diag{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:18px 20px;font-size:13px;line-height:2;font-family:var(--mono);margin-top:16px}
+    .ok{color:var(--gr)}.warn{color:var(--am)}.fail{color:var(--re)}
+    .inp{width:100%;padding:14px 16px;border:1.5px solid var(--bdm);border-radius:var(--r-sm);background:var(--sf);color:var(--t);font-size:16px;font-family:var(--sans);outline:none;font-weight:500;transition:border-color .12s ease}
+    .inp:focus{border-color:var(--t)}
+    .gear-btn{background:none;border:none;cursor:pointer;color:var(--t2);padding:8px;line-height:1;border-radius:999px}
+    .gear-btn:hover{background:var(--bg)}
+    .gate-overlay{position:fixed;inset:0;background:var(--bg);z-index:9999;overflow-y:auto;display:flex;align-items:flex-start;justify-content:center;padding:40px 18px;}
+    .gate-card{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r-lg);padding:32px;max-width:480px;width:100%;}
+    .gate-required{background:var(--sf);border:2px solid var(--t);border-radius:var(--r);padding:20px;margin-bottom:14px}
+    .gate-optional{background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:20px;margin-bottom:18px}
+    .gate-code{background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-sm);padding:16px;font-family:var(--mono);font-size:11px;color:var(--t2);overflow-x:auto;white-space:pre;max-height:220px;overflow-y:auto;line-height:1.5;}
+    .hero-glow{position:relative}
+    .hero-glow::before{content:'';position:absolute;inset:-2px;border-radius:inherit;padding:2px;
+      background:conic-gradient(from 0deg, var(--glow-1,transparent), var(--glow-2,var(--glow-1,transparent)), var(--glow-3,var(--glow-1,transparent)), var(--glow-1,transparent));
+      filter:blur(11px);opacity:.5;z-index:-1;animation:heroGlowPulse 4.5s ease-in-out infinite;pointer-events:none}
+    @keyframes heroGlowPulse{0%,100%{opacity:.35}50%{opacity:.7}}
+    @keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
+    .pulse-dot{animation:pulseDot 1.1s ease-in-out infinite}
+  </style>
+</head>
+<body>
+<div id="gate" class="gate-overlay" style="display:none">
+  <div class="gate-card">
+    <div style="font-size:28px;font-weight:800;letter-spacing:-0.6px;margin-bottom:6px">Get started</div>
+    <div style="font-size:15px;color:var(--t2);margin-bottom:28px;line-height:1.5">One thing is required. One is optional but unlocks AI model competition.</div>
+
+    <div class="gate-required">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="background:var(--t);color:var(--sf);width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0">1</span>
+        <span style="font-size:16px;font-weight:700">Odds API key</span>
+        <span style="font-size:11px;font-weight:700;color:var(--re);margin-left:auto">REQUIRED</span>
+      </div>
+      <input id="gate-odds" class="inp" type="password" placeholder="your-odds-api-key" style="margin-bottom:8px">
+      <div style="font-size:13px;color:var(--t3)">Free at <a href="https://the-odds-api.com" target="_blank" style="color:var(--t);font-weight:600">the-odds-api.com</a> &mdash; 500 requests/month, no card needed.</div>
+    </div>
+
+    <div class="gate-optional">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="background:var(--bdm);color:var(--t2);width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0">2</span>
+        <span style="font-size:16px;font-weight:700">Cloudflare Worker URL</span>
+        <span style="font-size:11px;font-weight:700;color:var(--t3);margin-left:auto">OPTIONAL</span>
+      </div>
+      <input id="gate-worker" class="inp" type="url" placeholder="https://your-worker.username.workers.dev" style="margin-bottom:8px">
+      <div style="font-size:13px;color:var(--t3);margin-bottom:14px">Without this, the math layer runs alone. With it, every AI provider you configure researches and competes daily to pick the best play.</div>
+
+      <button onclick="EL.toggleGateTutorial()" style="width:100%;display:flex;justify-content:space-between;align-items:center;background:var(--sf);border:1px solid var(--bdm);padding:12px 14px;border-radius:999px;color:var(--t);font-size:13px;cursor:pointer;font-weight:700;font-family:var(--sans)">
+        <span>How to deploy your Worker (5 min, free)</span>
+        <span id="gate-arrow" style="font-size:10px">&#x25bc;</span>
+      </button>
+      <div id="gate-tutorial" style="display:none;margin-top:10px">
+        <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r-sm);padding:16px;font-size:13px;line-height:1.8;margin-bottom:10px">
+          <div style="font-weight:700;margin-bottom:8px">The Worker holds your AI provider keys and routes requests. You control which models compete by setting their keys.</div>
+          <div style="margin-bottom:8px;padding:8px 10px;background:var(--bg);border-radius:8px;font-size:12px;line-height:1.6">All three models search the live web before picking &mdash; injuries, line moves, weather.</div>
+          <div style="margin-bottom:4px"><strong>1.</strong> Create a free account at <a href="https://dash.cloudflare.com/sign-up" target="_blank" style="color:var(--t);font-weight:600">cloudflare.com</a></div>
+          <div style="margin-bottom:4px"><strong>2.</strong> Go to <em>Workers &amp; Pages</em> &rarr; <em>Create</em> &rarr; <em>Hello World</em> &rarr; <em>Deploy</em></div>
+          <div style="margin-bottom:4px"><strong>3.</strong> Click <em>Edit Code</em> &rarr; clear everything &rarr; paste the code below &rarr; <em>Save and Deploy</em></div>
+          <div style="margin-bottom:4px"><strong>4.</strong> Go to <em>Settings</em> &rarr; <em>Variables</em>. Add any of these environment variables as <strong>Secret</strong> type, not Text:</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--t2);padding:10px 12px;background:var(--bg);border-radius:8px;margin:6px 0">
+            ANTHROPIC_KEY &mdash; console.anthropic.com<br>
+            OPENAI_KEY &mdash; platform.openai.com<br>
+            GEMINI_KEY &mdash; aistudio.google.com/apikey
+          </div>
+          <div style="margin-bottom:4px"><strong>5.</strong> Copy the Worker URL from the <em>Overview</em> tab and paste it in the field above</div>
+          <div style="font-size:12px;color:var(--t3);margin-top:8px;line-height:1.6">Only add keys for providers you have. Each provider key needs its own active billing &mdash; a ChatGPT Plus, Gemini Advanced, or Claude Pro subscription does not cover API usage. Live search calls (Claude, GPT-5.5, Gemini) cost slightly more per call than a plain text response &mdash; still a few cents a day at this volume. To change model versions, edit MODEL_CONFIG in index.html and push the site &mdash; the Worker never needs to change for this.</div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:700;color:var(--t2)">Worker code &mdash; paste into Cloudflare</div>
+          <button onclick="EL.copyWorkerCode()" style="font-size:12px;padding:5px 12px;background:var(--sf);border:1px solid var(--bdm);border-radius:999px;cursor:pointer;color:var(--t);font-family:var(--sans);font-weight:700" id="copy-btn">Copy</button>
+        </div>
+        <div id="worker-code-block" class="gate-code"></div>
+      </div>
+    </div>
+
+    <button onclick="EL.saveGate()" class="btn btn-primary" style="width:100%;padding:16px;font-size:16px;border-radius:999px">Get started</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div id="app"></div>
+  <div style="text-align:center;margin-top:48px;font-size:13px;color:var(--t3);line-height:1.7;font-weight:500">
+    Scans DraftKings, FanDuel, BetMGM, BetOnline, BetRivers, BetUS, Bovada, MyBookie, LowVig daily.<br>
+    Pinnacle as sharp reference &middot; Shin's de-vig &middot; Robust consensus fallback &middot; Refreshes daily at 6AM Pacific<br>
+    <span style="color:var(--t2)">The sharpest bet analysis available. Free.</span><br>
+    (As long as you at least think about donating some of your winnings to a charity in need.)
+  </div>
+</div>
+<script>
+// ── Constants ─────────────────────────────────────────────────────────────────
+const OB_BASE     = 'https://api.the-odds-api.com/v4';
+const getAK       = () => (LS.get('embet_keys')||{}).oddsapi||'';
+
+const BKS         = 'pinnacle,draftkings,fanduel,betmgm,betonlineag,betrivers,betus,bovada,mybookieag,lowvig';
+const START       = 'June 17, 2026';
+const FLAT        = 10;
+const MIN_CB      = 3;
+const MIN_EV      = 0.015;
+const MAX_AI_POOL  = 10; // candidates sent to AI models for evaluation
+const DISPLAY_POOL = 4;  // candidates shown in the pool section
+const SANITY_EV   = 0.20;
+const CLV_WINDOW  = 3 * 3600 * 1000; // lock CLV within 3h of game start
+const MIN_SCORED  = 10;               // min evaluated picks to display a model score
+const CACHE_VER   = 'embet_v3_picks_';
+const PRI = [
+  'baseball_mlb','basketball_nba','icehockey_nhl',
+  'americanfootball_nfl','americanfootball_ncaaf',
+  'basketball_ncaab','basketball_wnba','soccer_usa_mls','soccer_epl'
+];
+const PINNACLE_DEEP = new Set([
+  'baseball_mlb','basketball_nba','icehockey_nhl','americanfootball_nfl','soccer_epl'
+]);
+// Model versions and call tuning live here, not in the Worker. The Worker is
+// a pure router — it has no opinion about which model runs or how hard it
+// thinks. To bump a model or adjust reasoning depth, edit MODEL_CONFIG below
+// and push the site. The Worker never needs to change for this.
+const MODEL_CONFIG = {
+  claude: {
+    version: 'claude-sonnet-4-6',          // mid tier — pinned snapshot, no auto-updating alias exists at this generation
+    wantsSearch: true,
+    searchToolType: 'web_search_20260209', // Anthropic versions its web_search tool by date string
+    maxOutputTokens: 2500,
+  },
+  gpt4o: {
+    version: 'gpt-5.5',                    // mid tier — standard/flagship variant, not mini/nano (cheap) or Pro (premium)
+    wantsSearch: true,
+    maxOutputTokens: 2500,
+    reasoningEffort: 'low',                // GPT-5.5 reasons by default; this task doesn't need deep reasoning
+  },
+  gemini: {
+    version: 'gemini-1.5-flash',     // mid tier — Pro line, not Flash. Still "preview" as of June 2026.
+    wantsSearch: true,
+    maxOutputTokens: 1000,
+    thinkingLevel: 'low',                  // Gemini 3.1 Pro can't disable thinking entirely; this bounds it
+  },
+};
+
+const MODELS = {
+  claude: {id:'claude', name:'Claude', provider:'anthropic', colorVar:'var(--c-claude)', hasSearch: MODEL_CONFIG.claude.wantsSearch},
+  gpt4o:  {id:'gpt4o',  name:'GPT-5.5', provider:'openai',    colorVar:'var(--c-gpt)',    hasSearch: MODEL_CONFIG.gpt4o.wantsSearch},
+  gemini: {id:'gemini', name:'Gemini', provider:'google',    colorVar:'var(--c-gemini)', hasSearch: MODEL_CONFIG.gemini.wantsSearch},
+};
+const getWorkerUrl = () => { const u=LS.get('embet_worker_url')||''; return u.replace(/\/+$/,''); };
+
+// ── Math ──────────────────────────────────────────────────────────────────────
+const tD   = o => o > 0 ? o/100+1 : 100/Math.abs(o)+1;
+const iP   = o => 1/tD(o);
+const cEV  = (f,o) => f*(tD(o)-1)-(1-f);
+const oKey = (name,point) => point != null ? `${name}|${point}` : name;
+
+// Shin de-vig — qi²/Q formulation (Shin 1992).
+function shinProb(q1,q2){
+  const Q=q1+q2;
+  const pAt=(z,qi)=>z>=1?(qi*qi)/Q:(Math.sqrt(z*z+4*(1-z)*qi*qi/Q)-z)/(2*(1-z));
+  const f=z=>pAt(z,q1)+pAt(z,q2)-1;
+  let lo=0,hi=0.999999,flo=f(lo);
+  if(flo<=0||flo*f(hi)>0) return [q1/Q,q2/Q];
+  for(let i=0;i<60;i++){const mid=(lo+hi)/2,fm=f(mid);if((flo>0)===(fm>0)){lo=mid;flo=fm;}else hi=mid;}
+  const z=(lo+hi)/2,p1=pAt(z,q1),p2=pAt(z,q2),t=p1+p2;
+  return [p1/t,p2/t];
+}
+
+// Robust consensus — median + MAD outlier trimming.
+function robustProb(prices){
+  if(!prices.length) return null;
+  const probs=prices.map(iP).slice().sort((a,b)=>a-b);
+  const mid=Math.floor(probs.length/2);
+  const median=probs.length%2?probs[mid]:(probs[mid-1]+probs[mid])/2;
+  if(probs.length<MIN_CB) return probs.reduce((a,b)=>a+b,0)/probs.length;
+  const devs=probs.map(p=>Math.abs(p-median)).sort((a,b)=>a-b);
+  const dMid=Math.floor(devs.length/2);
+  const mad=(devs.length%2?devs[dMid]:(devs[dMid-1]+devs[dMid])/2)*1.4826;
+  const kept=mad>0?probs.filter(p=>Math.abs(p-median)<=3*mad):probs;
+  return kept.reduce((a,b)=>a+b,0)/kept.length;
+}
+
+// ── Deterministic pick ID — same game/market/side/book always yields same ID ──
+function hashId(str){
+  let h=5381;
+  for(let i=0;i<str.length;i++) h=((h<<5)+h)^str.charCodeAt(i);
+  return (h>>>0).toString(36).padStart(7,'0');
+}
+function pickId(commenceTime,mktLbl,betName,betPoint,bookKey){
+  return hashId(`${commenceTime}|${mktLbl}|${betName}|${betPoint??''}|${bookKey}`);
+}
+
+// ── Format ────────────────────────────────────────────────────────────────────
+const fO   = o => o==null?'—':o>0?`+${o}`:`${o}`;
+const fPct = v => `${(v*100).toFixed(1)}%`;
+const fEV  = v => `${v>=0?'+':''}${(v*100).toFixed(2)}% EV`;
+const fGap = v => `+${(v*100).toFixed(1)}pp`;
+const fCLV = v => v==null?'—':`${v>=0?'+':''}${v.toFixed(2)}pp`;
+const fDT  = iso => new Date(iso).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+const fDate= iso => new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+const today= () => new Date().toISOString().slice(0,10);
+const uid  = () => Math.random().toString(36).slice(2,8);
+const esc  = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const daysU= iso => Math.ceil((new Date(iso)-Date.now())/86400000);
+const dayTx= iso=>{const d=daysU(iso);if(d<=0)return'Today';if(d===1)return'Tomorrow';if(d<=6)return`${d} days`;if(d<=13)return'Next week';if(d<=30)return`${Math.ceil(d/7)} weeks`;return`${Math.ceil(d/30)} months`;};
+
+// ── Date label for history groups
+function fDateLabel(dateStr){
+  const t=today();
+  const yest=new Date(Date.now()-86400000).toISOString().slice(0,10);
+  if(dateStr===t) return 'Today';
+  if(dateStr===yest) return 'Yesterday';
+  const d=new Date(dateStr+'T12:00:00');
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
+
+// ── Staleness ─────────────────────────────────────────────────────────────────
+function isStale(generatedAt){
+  if(!generatedAt) return true;
+  const now=new Date();
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric',hour12:false}).formatToParts(now);
+  const g=t=>parseInt(parts.find(p=>p.type===t).value);
+  const ptAsLocal=new Date(Date.UTC(g('year'),g('month')-1,g('day'),g('hour'),g('minute'),g('second')));
+  const off=now.getTime()-ptAsLocal.getTime();
+  const pt6=new Date(Date.UTC(g('year'),g('month')-1,g('day'),6,0,0));
+  const thr=new Date(pt6.getTime()+off);
+  const eff=thr>now?new Date(thr.getTime()-86400000):thr;
+  return new Date(generatedAt)<eff;
+}
+
+// ── Storage ───────────────────────────────────────────────────────────────────
+const mem={};
+const LS={
+  get(k){try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return mem[k]||null;}},
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{} mem[k]=v;}
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+const st={loading:true,aiLoading:false,err:'',picks:null,history:[],histExpanded:{},showSettings:false,settleId:null,aiStatuses:{},workerModels:null,modelVersions:{},hasSearch:{},aiStartTimes:{}};
+let _aiTicker=null; // re-renders once/sec while any model is loading, so elapsed time is visible
+
+// ── AI prompt — single pick, clean competition ───────────────────────────────
+// Each model independently picks ONE best play and defends it.
+// The app surfaces multiple hero cards when models disagree.
+function buildPrompt(candidates, hasSearch) {
+  const searchInstr = hasSearch
+    ? `You have live web search. Use it before answering — on whatever you actually need to check for the candidate(s) you're weighing, not a fixed checklist.`
+    : `You do not have live web search. Rely only on durable knowledge you actually have. Do not invent or guess at recent news, scores, injuries, or events you cannot really know.`;
+
+  return `You are evaluating ${candidates.length} positive-EV betting candidates identified by a quantitative pricing model. The math has already found the edge — your job is to add something the math cannot.
+
+${searchInstr}
+
+THE BAR YOUR REASONING MUST CLEAR:
+State something specific and checkable such that, if it turned out to be false, your confidence in this pick would meaningfully change. That's the only test that matters — apply it yourself rather than following a template.
+
+Do not default to a fixed topic. Figure out for yourself what is actually load-bearing for THIS matchup. Depending on the game, that could be a roster or positional change, a coaching or tactical tendency, a schedule/fatigue/travel factor, a referee or umpire assignment, a specific line movement you can point to, a market-structure observation, or something else entirely — or it could genuinely be nothing material, in which case say so plainly and do not pad it.
+
+Three things that fail the bar and will be discarded:
+- Restating the numbers you were given (EV, gap, line, odds) as if that were analysis. The user can already see those.
+- Generic statements true of almost any game ("the weather is clear," "this offers a favorable risk-reward ratio," "this minimizes variance") that don't actually move the edge for this specific pick.
+- Asserting a pattern about a sportsbook or oddsmaker's tendencies unless you can point to real evidence for it (something you found, not a general impression). An unsupported claim about "Pinnacle tends to overvalue X" is worse than no claim at all.
+
+Candidates (ev = expected value as decimal, gap = probability edge as decimal, line = American odds):
+${JSON.stringify(candidates.map(c=>({
+  id:c.id, game:c.game, bet:c.bet, book:c.book,
+  line:c.line, ev:c.ev, gap:c.gap,
+  method:c.method, daysOut:daysU(c.commenceTime)
+})),null,2)}
+
+Return ONLY valid JSON, matching this key order exactly — reasoning first, so you build your case before naming a pick, not after:
+{"reasoning":"2-3 sentences. Must contain something specific that would change your confidence if false, or explicitly state nothing material was found. Never just restate the provided numbers.","confidence":"HIGH|MEDIUM|LOW","topPickId":"the exact id string from the candidates array matching the reasoning above"}`;
+}
+
+// ── JSON cleaning — strip markdown fences before parsing ─────────────────────
+// Models sometimes wrap JSON in ```json fences despite instructions not to.
+// Parse failures are thrown, not silently papered over — a failed parse should
+// show up as a visible model failure, never get laundered into a fake pick.
+function cleanAndParseJSON(rawText) {
+  let t = (rawText||'').trim();
+  if (t.startsWith('```json')) t = t.slice(7);
+  else if (t.startsWith('```')) t = t.slice(3);
+  if (t.endsWith('```')) t = t.slice(0, -3);
+  t = t.trim();
+  const match = t.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No JSON object found in response');
+  return JSON.parse(match[0]);
+}
+
+const AI_TIMEOUT_MS = 90000; // 28s was right for non-reasoning GPT-4o; GPT-5.5 (reasoning) + live search needs more room — abort a truly stalled call rather than leaving the user guessing
+
+// ── Model callers — all AI calls route through the Worker ─────────────────────
+// Always either resolves with a valid result or throws — never returns null.
+// The throw is what lets runAllModels surface the real failure reason instead
+// of a generic "no result" message.
+async function callModel(modelId, candidates) {
+  const workerUrl = getWorkerUrl();
+  if (!workerUrl) throw new Error('No Worker configured');
+  const m = MODELS[modelId];
+  const cfg = MODEL_CONFIG[modelId];
+  if (!m || !cfg) throw new Error('Unknown model');
+  if (!st.workerModels || !st.workerModels.includes(modelId)) throw new Error('Model not active in Worker config');
+
+  const systemPrompt = 'You are a sharp sports betting analyst whose job is to add real-world context beyond what a pricing model already knows. You never restate provided numbers as if they were analysis. Return only valid JSON with no markdown or extra text.';
+  const userPrompt = buildPrompt(candidates, cfg.wantsSearch);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+
+  try {
+    const r = await fetch(`${workerUrl}/api/analyze`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        provider: m.provider,
+        model: cfg.version,
+        systemPrompt, userPrompt,
+        wantsSearch: cfg.wantsSearch,
+        searchToolType: cfg.searchToolType,
+        maxOutputTokens: cfg.maxOutputTokens,
+        reasoningEffort: cfg.reasoningEffort,
+        thinkingLevel: cfg.thinkingLevel,
+      }),
+      signal: controller.signal
+    });
+    const rawBody = await r.text();
+    if (!r.ok) {
+      let errMsg = `Worker HTTP ${r.status}`;
+      try { const j = JSON.parse(rawBody); errMsg = j.error || errMsg; } catch(e) {}
+      throw new Error(errMsg);
+    }
+    let d;
+    try { d = JSON.parse(rawBody); } catch(e) { throw new Error('Worker returned non-JSON'); }
+    if (d.error) throw new Error(d.error);
+
+    const result = cleanAndParseJSON(d.text || '');
+
+    if (!result.topPickId || !candidates.find(c => c.id === result.topPickId)) {
+      throw new Error('Model returned an invalid or missing pick id');
+    }
+
+    return {
+      topPickId: result.topPickId,
+      confidence: result.confidence || 'MEDIUM',
+      reasoning: result.reasoning || ''
+    };
+  } catch(e) {
+    if (e.name === 'AbortError') {
+      throw new Error(`Timed out after ${Math.round(AI_TIMEOUT_MS/1000)}s`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runAllModels(candidates, modelsToRun=null) {
+  if (!candidates.length) return;
+
+  // Ensure Worker config is resolved before running.
+  // If modelVersions is empty the config fetch hasn't completed yet — re-sync
+  // rather than relying on the init timing chain to have beaten us here.
+  if (getWorkerUrl() && Object.keys(st.modelVersions).length === 0) {
+    await syncWorkerConfiguration();
+  }
+
+  const ids = modelsToRun || st.workerModels || [];
+  if (!ids.length) return;
+
+  st.aiLoading = true;
+  ids.forEach(id => { st.aiStatuses[id] = 'loading'; st.aiStartTimes[id] = Date.now(); });
+  // Tick every second so elapsed time is visible while models are working —
+  // answers "is this stuck?" without needing actual token streaming.
+  if (!_aiTicker) _aiTicker = setInterval(render, 1000);
+  render();
+
+  const results = await Promise.allSettled(ids.map(id => callModel(id, candidates)));
+  const modelResults = st.picks?.modelResults || {};
+
+  // callModel always either resolves with a valid result or rejects with a
+  // real error message now — no more "fulfilled but null" ambiguity to sort out.
+  results.forEach((r, i) => {
+    const id = ids[i];
+    if (r.status === 'fulfilled') {
+      modelResults[id] = r.value;
+      st.aiStatuses[id] = 'ok';
+      recordModelPicks(id, r.value, candidates);
+    } else {
+      st.aiStatuses[id] = `error: ${r.reason?.message || 'Unknown failure'}`;
+    }
+  });
+
+  st.picks = {...st.picks, modelResults, totalModels: Object.keys(modelResults).length, aiAnalyzedAt: new Date().toISOString()};
+  LS.set(CACHE_VER+today(), st.picks);
+  st.aiLoading = false;
+  if (_aiTicker) { clearInterval(_aiTicker); _aiTicker = null; }
+  render();
+}
+
+async function syncWorkerConfiguration() {
+  const workerUrl = getWorkerUrl();
+  if (!workerUrl) { st.workerModels = null; st.modelVersions = {}; st.hasSearch = {}; return; }
+  try {
+    const r = await fetch(`${workerUrl}/api/config`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if (!d.activeProviders) {
+      throw new Error('Worker is running an old version of the router contract — redeploy worker.js from the landing page setup instructions.');
+    }
+    st.workerModels  = Object.keys(MODELS).filter(id => d.activeProviders[MODELS[id].provider]);
+    st.modelVersions = Object.fromEntries(st.workerModels.map(id => [id, MODEL_CONFIG[id].version]));
+    st.hasSearch      = Object.fromEntries(st.workerModels.map(id => [id, !!MODEL_CONFIG[id].wantsSearch]));
+  } catch(e) {
+    console.warn('Worker config sync failed:', e.message);
+    st.workerModels = null;
+  }
+}
+
+// ── CLV + model performance ───────────────────────────────────────────────────
+function captureClosingLines(allGames){
+  const now=Date.now();
+  const open=st.history.filter(p=>!p.clvLocked&&!p.result); // unsettled, no CLV yet
+  if(!open.length) return false;
+  let changed=false;
+
+  for(const pick of open){
+    const gameMs=new Date(pick.commenceTime).getTime();
+    const toGame=gameMs-now;
+    if(toGame>CLV_WINDOW||toGame<0) continue; // not in window
+
+    const g=allGames.find(g=>g.commence_time===pick.commenceTime);
+    if(!g) continue;
+
+    const bm=g.bookmakers.find(b=>(b.title||b.key)===pick.book);
+    if(!bm) continue;
+
+    const mktKey=pick.mkt==='ML'?'h2h':pick.mkt==='Spread'?'spreads':'totals';
+    const mkt=bm.markets?.find(m=>m.key===mktKey);
+    if(!mkt?.outcomes) continue;
+
+    const betName=pick.bet.replace(/ \([^)]+\)$/,'');
+    const ptMatch=pick.bet.match(/\(([+-]?\d+\.?\d*)\)$/);
+    const betPt=ptMatch?parseFloat(ptMatch[1]):null;
+    const outcome=mkt.outcomes.find(o=>o.name===betName&&(betPt===null||o.point===betPt));
+    if(!outcome) continue;
+
+    // CLV_pp: positive = closing line worse for bettor = we got better price = good
+    const closingImplied=iP(outcome.price);
+    pick.clv_pp=(closingImplied-pick.bookImplied)*100;
+    pick.closingLine=outcome.price;
+    pick.closingImplied=closingImplied;
+    pick.clvLocked=true;
+    pick.clvLockedAt=new Date().toISOString();
+    changed=true;
+    updateModelCLV(pick.id,pick.clv_pp);
+  }
+  return changed;
+}
+
+function recordModelPicks(modelId,aiResult,candidates){
+  const perf=LS.get('embet_model_perf')||{};
+  if(!perf[modelId]) perf[modelId]={picks:[]};
+  for(const c of candidates){
+    if(perf[modelId].picks.find(p=>p.pickId===c.id)) continue;
+    const ap=aiResult.picks.find(p=>p.id===c.id);
+    perf[modelId].picks.push({pickId:c.id,date:today(),confidence:ap?.confidence||'MEDIUM',rank:ap?.rank||99,ev:c.ev,clv_pp:null,clvLocked:false});
+  }
+  LS.set('embet_model_perf',perf);
+}
+
+function updateModelCLV(pickId,clv_pp){
+  const perf=LS.get('embet_model_perf')||{};
+  let changed=false;
+  for(const mid in perf){
+    const rec=perf[mid].picks.find(p=>p.pickId===pickId);
+    if(rec&&!rec.clvLocked){rec.clv_pp=clv_pp;rec.clvLocked=true;changed=true;}
+  }
+  if(changed) LS.set('embet_model_perf',perf);
+}
+
+// ── DOM helpers ───────────────────────────────────────────────────────────────
+const bdg    = (cls,txt) => `<span class="badge ${cls}">${esc(String(txt))}</span>`;
+const getRes = id => st.history.find(h=>h.id===id)?.result||null;
+function confBadge(conf){const map={HIGH:'bs',MEDIUM:'bi',LOW:'bw',PASS:'bd'};return bdg(map[conf]||'bn',conf||'—');}
+function methBadge(method){return method==='sharp'?bdg('bs','Sharp ref'):bdg('bi','Market outlier');}
+
+// ── Settings panel ────────────────────────────────────────────────────────────
+function rSettings(){
+  const oddsKey=getAK();
+  const workerUrl=LS.get('embet_worker_url')||'';
+  const activeNames=(st.workerModels||[]).map(id=>MODELS[id]?.name).filter(Boolean);
+  const versionLines=(st.workerModels||[]).map(id=>`${MODELS[id]?.name||id}: ${st.modelVersions[id]||'?'}${st.hasSearch[id]?' (search)':' (no search)'}`);
+
+  return `<div style="max-width:460px;margin:32px auto">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px">
+        <div>
+          <div style="font-weight:500;font-size:16px;margin-bottom:3px">Settings</div>
+          <div style="font-size:12px;color:var(--t2)">All keys stored in your browser only.</div>
+        </div>
+        <button style="background:none;border:none;cursor:pointer;color:var(--t2);font-size:22px;line-height:1;padding:0;flex-shrink:0;margin-left:16px" onclick="EL.closeSettings()">&#215;</button>
+      </div>
+
+      <div style="margin-bottom:22px;padding-bottom:20px;border-bottom:.5px solid var(--bd)">
+        <div style="font-size:12px;font-weight:500;letter-spacing:.3px;text-transform:uppercase;color:var(--t2);margin-bottom:10px">Odds data</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
+          <span style="font-size:13px;font-weight:500">The Odds API</span>
+          ${oddsKey?`<span style="font-size:11px;color:var(--gr)">&#x2713; connected</span>`:`<span style="font-size:11px;color:var(--re)">required</span>`}
+        </div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:7px">Free tier: 500 requests/month at the-odds-api.com</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="inp" type="password" id="key_oddsapi" placeholder="your-odds-api-key" value="${esc(oddsKey)}" oninput="EL.saveKey('oddsapi',this.value)">
+          ${oddsKey?`<button class="btn" style="white-space:nowrap;font-size:12px;color:var(--re);border-color:var(--rebd)" onclick="EL.clearKey('oddsapi')">Clear</button>`:''}
+        </div>
+      </div>
+
+      <div style="margin-bottom:22px;padding-bottom:20px;border-bottom:.5px solid var(--bd)">
+        <div style="font-size:12px;font-weight:500;letter-spacing:.3px;text-transform:uppercase;color:var(--t2);margin-bottom:10px">AI competition</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
+          <span style="font-size:13px;font-weight:500">Cloudflare Worker</span>
+          ${workerUrl?`<span style="font-size:11px;color:var(--ac)">&#x2713; connected</span>`:`<span style="font-size:11px;color:var(--t3)">optional</span>`}
+        </div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:7px">Routes AI calls. Keys live in the Worker, not here. See setup instructions on the gate page.</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="inp" type="url" id="setting_worker_url" placeholder="https://your-worker.username.workers.dev" value="${esc(workerUrl)}" oninput="EL.saveWorkerUrl(this.value)">
+          ${workerUrl?`<button class="btn" style="white-space:nowrap;font-size:12px;color:var(--re);border-color:var(--rebd)" onclick="EL.clearWorkerUrl()">Disconnect</button>`:''}
+        </div>
+        ${activeNames.length?`<div style="margin-top:8px;font-size:11px;color:var(--t2)">
+          Active models: ${activeNames.join(', ')}<br>
+          Versions: ${versionLines.join(' &middot; ')}
+        </div>`:''}
+      </div>
+
+      <div style="padding-top:12px">
+        <button class="btn" style="font-size:13px;padding:8px 20px" onclick="EL.closeSettings()">Done</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+
+// ── Model leaderboard ─────────────────────────────────────────────────────────
+function rLeaderboard(){
+  const perf=LS.get('embet_model_perf')||{};
+  const keys=LS.get('embet_keys')||{};
+  const visible=Object.keys(MODELS).filter(id=>keys[id]||(perf[id]?.picks?.length>0));
+  if(!visible.length) return '';
+
+  const rows=visible.map(id=>{
+    const m=MODELS[id];
+    const data=perf[id]||{picks:[]};
+    const evaluated=data.picks.filter(p=>p.clvLocked);
+    const confirmed=evaluated.filter(p=>p.confidence==='HIGH'||p.confidence==='MEDIUM');
+    const hasEnough=evaluated.length>=MIN_SCORED;
+    const avgCLV=confirmed.length?confirmed.reduce((s,p)=>s+p.clv_pp,0)/confirmed.length:null;
+    const statusTxt=!hasEnough?`${evaluated.length}/${MIN_SCORED} needed`:avgCLV>1.0?'Leading':avgCLV>0?'Competitive':'Lagging';
+    const statusCls=!hasEnough?'bn':avgCLV>1.0?'bs':avgCLV>0?'bi':'bd';
+    const active=!!keys[id];
+    return `<tr>
+      <td>
+        <span style="font-size:13px;font-weight:500">${m.name}</span>
+        ${m.hasSearch?`<span style="font-size:10px;color:var(--t3);margin-left:5px">+search</span>`:''}
+        ${!active?`<span style="font-size:10px;color:var(--t3);margin-left:5px">(no key)</span>`:''}
+      </td>
+      <td class="mono" style="font-size:12px">${evaluated.length} / ${data.picks.length}</td>
+      <td class="mono" style="font-size:12px;color:${avgCLV===null?'var(--t3)':avgCLV>=0?'var(--gr)':'var(--re)'}">${avgCLV===null?'—':fCLV(avgCLV)}</td>
+      <td>${bdg(statusCls,statusTxt)}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="card" style="padding:0;overflow:hidden;margin-top:4px">
+    <div style="padding:14px 16px 2px;font-size:13px;font-weight:500">Model performance</div>
+    <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead><tr>
+          <th>Model</th><th>CLV locked / total</th><th>Avg CLV (confirmed picks)</th><th>Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="padding:10px 16px 14px;font-size:11px;color:var(--t3);line-height:1.6">
+      CLV = closing line value. Positive means the market moved toward your side after the pick — the edge was real.<br>
+      Measured on HIGH/MEDIUM picks only. Score activates at ${MIN_SCORED} evaluated picks.
+    </div>
+  </div>`;
+}
+
+// ── Model status strip ───────────────────────────────────────────────────────
+function rModelStatus(pickId){
+  const keys=LS.get('embet_keys')||{};
+  const configured=Object.values(MODELS).filter(m=>keys[m.id]);
+  if(!configured.length) return '';
+  const modelResults=st.picks?.modelResults||{};
+
+  const items=configured.map(m=>{
+    const status=st.aiStatuses[m.id];
+    const result=modelResults[m.id];
+    const ap=result?.picks?.find(p=>p.id===pickId);
+    const isTop=result?.topPickId===pickId;
+    let right;
+    if(status==='loading'){
+      right=`<span style="color:var(--t3);font-family:var(--mono)">···</span>`;
+    } else if(!result||status==='error'){
+      right=`<span style="color:var(--re)">&#x2717; failed</span>`;
+    } else if(ap){
+      const col=ap.confidence==='HIGH'?'var(--gr)':ap.confidence==='MEDIUM'?'var(--ac)':ap.confidence==='LOW'?'var(--am)':'var(--re)';
+      right=`<span style="color:${col};font-weight:500">${ap.confidence}</span>${isTop?` <span style="color:var(--t3)">&#x2191; top</span>`:''}`;
+    } else {
+      right=`<span style="color:var(--t3)">—</span>`;
+    }
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0">
+      <span style="font-size:11px;color:var(--t2)">${m.name}${m.hasSearch?`<span style="font-size:9px;color:var(--t3);margin-left:3px">+search</span>`:''}</span>
+      <span style="font-size:11px">${right}</span>
+    </div>`;
+  }).join('');
+
+  const cols=configured.length>2?'1fr 1fr':'1fr';
+  return `<div style="margin-top:10px;padding:9px 12px;background:var(--bg);border-radius:6px;display:grid;grid-template-columns:${cols};gap:0 20px">${items}</div>`;
+}
+
+// ── Model header — always-visible connection indicators ──────────────────────
+// Each model's pill always uses ITS OWN brand color when configured — status
+// (loading/ok/error/inactive) is conveyed by opacity, a pulsing dot, and a text
+// suffix instead of swapping colors, since GPT-4o's brand color is red and we
+// don't want that confused with an error state.
+function rModelHeader(){
+  if(!getWorkerUrl()) return '';
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+    ${Object.values(MODELS).map(m=>{
+      const inWorker=st.workerModels?.includes(m.id);
+      const status=st.aiStatuses[m.id];
+      const brand=m.colorVar;
+      let dotCls='', dotStyle=`background:${brand}`, suffix='', textCol=brand, borderCol=brand, opacity='1';
+
+      if(!inWorker){
+        textCol='var(--t3)'; borderCol='var(--bdm)'; dotStyle='background:var(--t3)'; opacity='.6';
+      } else if(status==='loading'){
+        const secs=st.aiStartTimes[m.id]?Math.round((Date.now()-st.aiStartTimes[m.id])/1000):0;
+        suffix=` &middot; ${secs}s`; dotCls='pulse-dot';
+      } else if(status&&status.startsWith('error')){
+        const msg=status.replace('error: ','');
+        suffix=' &middot; failed';
+        opacity='.55';
+        dotStyle=`background:${brand}`;
+      } else if(status==='ok'){
+        suffix=' &middot; picked';
+      } else {
+        opacity='.7'; // configured, hasn't run yet today
+      }
+
+      return `<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:${textCol};background:var(--sf);border:1.5px solid ${borderCol};padding:5px 12px;border-radius:999px;opacity:${opacity}">
+        <span class="${dotCls}" style="width:7px;height:7px;border-radius:50%;${dotStyle};flex-shrink:0"></span>${esc(m.name)}${suffix}
+      </span>`;
+    }).join('')}
+  </div>`;
+}
+
+// ── Candidate pool — collapsible section showing what models evaluated ────────
+function rPool(candidates){
+  if(!candidates.length||!getWorkerUrl()) return '';
+  const modelResults=st.picks?.modelResults||{};
+  const exp=!!st.histExpanded['__pool__'];
+
+  const rows=candidates.slice(0,DISPLAY_POOL).map((c,i)=>{
+    // Which models chose this pick — badge in each model's own brand color
+    const choosers=Object.entries(modelResults)
+      .filter(([mid,res])=>res.topPickId===c.id)
+      .map(([mid])=>MODELS[mid]);
+    const badges=choosers.filter(Boolean).map(m=>`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;color:${m.colorVar};border:1px solid ${m.colorVar}">${esc(m.name)}</span>`).join(' ');
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:.5px solid var(--bd);gap:10px">
+      <div style="flex:1;min-width:0">
+        <span style="font-size:12px;font-weight:500">${esc(c.bet)}</span>
+        <span style="font-size:11px;color:var(--t2);margin-left:6px">${esc(c.book)} ${fO(c.line)}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        ${badges}
+        <span class="mono" style="font-size:11px;color:var(--gr)">${fEV(c.ev)}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  const total=candidates.length;
+  const shown=Math.min(DISPLAY_POOL,total);
+  return `<div class="card" style="padding:0;overflow:hidden;margin-top:4px">
+    <div onclick="EL.toggleDate('__pool__')" style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;cursor:pointer;user-select:none">
+      <span style="font-size:12px;font-weight:500;color:var(--t2)">Candidate pool &mdash; ${total} plays evaluated</span>
+      <span style="color:var(--t3);font-size:10px">${exp?'&#x25b2;':'&#x25bc;'}</span>
+    </div>
+    ${exp?`<div style="padding:0 16px 10px">${rows}${total>DISPLAY_POOL?`<div style="font-size:11px;color:var(--t3);margin-top:6px">Showing top ${shown} of ${total} by EV. All ${total} were evaluated by the models.</div>`:''}</div>`:''}
+  </div>`;
+}
+
+// ── Hero card — competition format ──────────────────────────────────────────
+// endorsements = [{modelId, modelName, confidence, reasoning}]
+function rHero(pick, endorsements) {
+  if(!pick) return '';
+  const res = getRes(pick.id);
+  const totalActive = st.workerModels?.length || 0;
+  const allAgree = totalActive > 1 && endorsements.length === totalActive;
+
+  // Glow border: each endorsing model contributes its own brand color to a
+  // conic-gradient ring around the card. One model = solid color. Multiple =
+  // the colors blend around the edge, positioned in the order they endorsed.
+  const glowColors = endorsements.map(e => MODELS[e.modelId]?.colorVar).filter(Boolean);
+  let glowStyle = '';
+  if (glowColors.length === 1) {
+    glowStyle = `--glow-1:${glowColors[0]};--glow-2:${glowColors[0]};--glow-3:${glowColors[0]};`;
+  } else if (glowColors.length === 2) {
+    glowStyle = `--glow-1:${glowColors[0]};--glow-2:${glowColors[1]};--glow-3:${glowColors[0]};`;
+  } else if (glowColors.length >= 3) {
+    glowStyle = `--glow-1:${glowColors[0]};--glow-2:${glowColors[1]};--glow-3:${glowColors[2]};`;
+  }
+  const glowCls = glowColors.length ? ' hero-glow' : '';
+
+  // Header label reflects the competition result clearly. Color: a single
+  // endorsing model gets its own brand color in the label; multiple models
+  // let the glow ring carry the color story, so the label text stays neutral.
+  let headerLabel, headerColor;
+  if (!totalActive || endorsements.length === 0) {
+    headerLabel = 'Top play by EV'; headerColor = 'var(--t2)';
+  } else if (allAgree) {
+    headerLabel = `All ${endorsements.length} models agree`; headerColor = 'var(--t)';
+  } else if (endorsements.length === 1) {
+    headerLabel = `${endorsements[0].modelName}&rsquo;s pick`; headerColor = MODELS[endorsements[0].modelId]?.colorVar || 'var(--t2)';
+  } else {
+    headerLabel = endorsements.map(e=>e.modelName).join(' &middot; '); headerColor = 'var(--t)';
+  }
+
+  const highestConf = endorsements.length
+    ? (endorsements.some(e=>e.confidence==='HIGH')?'HIGH':endorsements[0].confidence)
+    : '—';
+
+  const clvLine = pick.clvLocked
+    ? `<span style="font-size:11px;font-family:var(--mono);color:${pick.clv_pp>=0?'var(--gr)':'var(--re)'}">${pick.clv_pp>=0?'+':''}${pick.clv_pp!=null?pick.clv_pp.toFixed(2):'?'}pp CLV</span>`
+    : '';
+  const resBadge = res ? bdg(res==='W'?'bs':res==='L'?'bd':'bw',res==='W'?'Won':res==='L'?'Lost':'Push') : '';
+  const settleRow = res
+    ? `<div style="margin-top:12px">${resBadge} ${clvLine}</div>`
+    : `<div style="display:flex;gap:7px;margin-top:14px;align-items:center;flex-wrap:wrap">
+        ${['W','L','P'].map(r=>`<button class="rbtn${getRes(pick.id)===r?' '+r:''}" onclick="EL.settle('${pick.id}','${r}')">${r==='W'?'Mark won':r==='L'?'Mark lost':'Push'}</button>`).join('')}
+        ${clvLine?`<div style="margin-left:4px">${clvLine}</div>`:''}
+      </div>`;
+  const refLine = pick.method==='sharp'
+    ? `Pinnacle de-vigged fair: ${fPct(pick.fair)} &mdash; ${esc(pick.book)} offers ${fPct(pick.bookImplied)}.`
+    : `${esc(pick.book)} prices this at ${fPct(pick.bookImplied)} &mdash; ${pick.booksInPool}-book consensus fair: ${fPct(pick.fair)}.`;
+
+  // Each endorsing model gets a labeled reasoning block in its own brand color
+  const reasoningBlocks = endorsements.map(e => `
+    <div class="reasoning">
+      <span style="font-size:10px;letter-spacing:.4px;text-transform:uppercase;color:${MODELS[e.modelId]?.colorVar||'var(--ac)'};font-style:normal;display:block;margin-bottom:5px;font-weight:700">${esc(e.modelName)} &middot; ${e.confidence}</span>
+      ${esc(e.reasoning)}
+    </div>`).join('');
+
+  return `
+  <div class="hero${glowCls}" style="${glowStyle}">
+    <div style="font-size:12px;letter-spacing:.3px;text-transform:uppercase;color:${headerColor};margin-bottom:12px;font-weight:800">${headerLabel}</div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px">
+          ${confBadge(highestConf)} ${methBadge(pick.method)} ${bdg('bn',pick.sport)} ${bdg('bn',pick.mkt)} ${bdg('bn',dayTx(pick.commenceTime))}
+        </div>
+        <div style="font-size:21px;font-weight:800;margin-bottom:4px;letter-spacing:-0.3px">${esc(pick.bet)}</div>
+        <div style="font-size:13px;color:var(--t2)">${esc(pick.game)}</div>
+        <div style="font-size:11px;color:var(--t3);margin-top:2px">${fDT(pick.commenceTime)}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:30px;font-weight:800;color:var(--gr);line-height:1;letter-spacing:-0.5px">${fEV(pick.ev)}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:3px;letter-spacing:.3px;text-transform:uppercase">${fGap(pick.gap)} off fair</div>
+      </div>
+    </div>
+    <div class="igrid">
+      <div><span class="lbl">Bet at</span><div style="font-size:15px;font-weight:500">${esc(pick.book)}</div></div>
+      <div><span class="lbl">Line</span><div style="font-size:22px;font-weight:800">${fO(pick.line)}</div></div>
+      <div><span class="lbl">Implied</span><div class="mono" style="font-size:15px;color:var(--t2)">${fPct(pick.bookImplied)}</div></div>
+      <div><span class="lbl">Fair</span><div class="mono" style="font-size:15px;color:var(--gr)">${fPct(pick.fair)}</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--t3);margin-bottom:${endorsements.length||st.aiLoading?'0':'12px'}">${refLine}</div>
+    ${reasoningBlocks}
+    ${st.aiLoading&&!endorsements.length?`<div class="ai-loading">Models analyzing&hellip;</div>`:''}
+    ${settleRow}
+  </div>`;
+}
+
+
+// ── Candidate card ────────────────────────────────────────────────────────────
+function rCand(pick,aiPick,rank){
+  if(!pick) return '';
+  const res=getRes(pick.id);
+  const conf=aiPick?.confidence;
+  const note=aiPick?.note||'';
+  const clvTxt=pick.clvLocked?`<div style="font-size:10px;font-family:var(--mono);color:${pick.clv_pp>=0?'var(--gr)':'var(--re)'};margin-top:3px">${pick.clv_pp>=0?'+':''}${pick.clv_pp.toFixed(2)}pp CLV</div>`:'';
+  return `
+  <div class="cand">
+    <div class="rank-num">${rank}</div>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:5px">
+        ${conf?confBadge(conf):''} ${methBadge(pick.method)} ${bdg('bn',pick.sport)} ${bdg('bn',dayTx(pick.commenceTime))}
+      </div>
+      <div style="font-size:15px;font-weight:700;margin-bottom:2px">${esc(pick.bet)}</div>
+      <div style="font-size:12px;color:var(--t2)">${esc(pick.game)}</div>
+      ${note?`<div style="font-size:11px;color:var(--t2);margin-top:4px;font-style:italic">${esc(note)}</div>`:''}
+    </div>
+    <div style="text-align:right;flex-shrink:0">
+      <div style="font-size:15px;font-weight:800;color:var(--gr)">${fEV(pick.ev)}</div>
+      <div style="font-size:11px;color:var(--t3)">${esc(pick.book)} ${fO(pick.line)}</div>
+      ${clvTxt}
+      ${res?`<div style="margin-top:6px">${bdg(res==='W'?'bs':res==='L'?'bd':'bw',res==='W'?'Won':res==='L'?'Lost':'Push')}</div>`:`<button class="btn" style="margin-top:6px;padding:3px 8px;font-size:11px" onclick="EL.openSettle('${pick.id}')">Settle</button>`}
+    </div>
+  </div>`;
+}
+
+// ── History section ─────────────────────────────────────────────────────────
+function rHistory(){
+  const histPicks=st.history.filter(p=>p.surfacedDate&&p.surfacedDate!==today());
+  if(!histPicks.length) return '';
+  const groups={};
+  for(const p of histPicks)(groups[p.surfacedDate]||=[]).push(p);
+  const dates=Object.keys(groups).sort((a,b)=>new Date(b)-new Date(a));
+
+  const groupsHtml=dates.map((date,i)=>{
+    const picks=groups[date].slice().sort((a,b)=>new Date(a.commenceTime)-new Date(b.commenceTime));
+    const settled=picks.filter(p=>p.result);
+    const W=settled.filter(p=>p.result==='W').length;
+    const L=settled.filter(p=>p.result==='L').length;
+    const P=settled.filter(p=>p.result==='P').length;
+    const pnl=settled.reduce((s,p)=>{
+      if(p.result==='W') return s+FLAT*(tD(p.line)-1);
+      if(p.result==='L') return s-FLAT;
+      return s;
+    },0);
+    const clvLocked=picks.filter(p=>p.clvLocked);
+    const avgCLV=clvLocked.length?clvLocked.reduce((s,p)=>s+p.clv_pp,0)/clvLocked.length:null;
+    const expanded=st.histExpanded[date]!==undefined?st.histExpanded[date]:(i===0);
+
+    // Build summary chips using string concat to avoid nested template literal issues
+    let chips='';
+    if(settled.length) chips+=`<span style="font-size:11px;font-weight:500">${W}W &mdash; ${L}L${P>0?' &mdash; '+P+'P':''}</span>`;
+    if(settled.length&&pnl!==0) chips+=(chips?'<span style="color:var(--bd);margin:0 4px">&middot;</span>':'')+`<span style="font-size:11px;font-family:var(--mono);color:${pnl>=0?'var(--gr)':'var(--re)'}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span>`;
+    if(avgCLV!==null) chips+=(chips?'<span style="color:var(--bd);margin:0 4px">&middot;</span>':'')+`<span style="font-size:11px;color:${avgCLV>=0?'var(--gr)':'var(--re)'}">avg CLV ${avgCLV>=0?'+':''}${avgCLV.toFixed(2)}pp</span>`;
+    if(!settled.length&&picks.length) chips+=`<span style="font-size:11px;color:var(--t3)">${picks.length} pending</span>`;
+
+    const rows=picks.map(p=>{
+      const r=getRes(p.id)||p.result;
+      const clvCell=p.clvLocked
+        ?`<span class="mono" style="font-size:11px;color:${p.clv_pp>=0?'var(--gr)':'var(--re)'}">${fCLV(p.clv_pp)}</span>`
+        :`<span style="color:var(--t3);font-size:11px">&mdash;</span>`;
+      const autoMark=p.autoSettled?` <span style="font-size:9px;color:var(--t3)">auto</span>`:'';
+      const resultCell=r
+        ?bdg(r==='W'?'bs':r==='L'?'bd':'bw',r==='W'?'Win':r==='L'?'Loss':'Push')+autoMark
+        :`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="EL.openSettle('${p.id}')">Record</button>`;
+      return `<tr>
+        <td><div style="font-size:12px;font-weight:500">${esc(p.bet)}</div><div style="font-size:11px;color:var(--t2)">${esc(p.game)} &middot; ${fDT(p.commenceTime)}</div></td>
+        <td style="white-space:nowrap">${methBadge(p.method)} <span class="mono" style="font-size:12px">${fO(p.line)}</span></td>
+        <td>${clvCell}</td>
+        <td>${resultCell}</td>
+      </tr>`;
+    }).join('');
+
+    const rad=expanded?'var(--r) var(--r) 0 0':'var(--r)';
+    return `<div style="margin-bottom:8px">
+      <div onclick="EL.toggleDate('${date}')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;cursor:pointer;background:var(--sf);border:.5px solid var(--bd);border-radius:${rad};user-select:none">
+        <span style="font-size:13px;font-weight:500">${fDateLabel(date)}</span>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${chips}
+          <span style="color:var(--t3);font-size:10px;margin-left:4px">${expanded?'&#x25b2;':'&#x25bc;'}</span>
+        </div>
+      </div>
+      ${expanded?`<div style="background:var(--sf);border:.5px solid var(--bd);border-top:none;border-radius:0 0 var(--r) var(--r);overflow-x:auto"><table class="tbl"><thead><tr><th>Pick</th><th>Method / line</th><th>CLV</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table></div>`:''}
+    </div>`;
+  }).join('');
+
+  return `<div style="margin-top:12px">
+    <div style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--t3);margin-bottom:8px">Pick history</div>
+    ${groupsHtml}
+  </div>`;
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render(){
+  const app=document.getElementById('app');
+  if(!app) return;
+
+  if(st.showSettings){app.innerHTML=rSettings();return;}
+
+  if(st.settleId){
+    const cands=st.picks?.candidates||[];
+    const p=[...cands,...st.history].find(x=>x&&x.id===st.settleId);
+    if(!p){st.settleId=null;render();return;}
+    const cur=getRes(p.id)||'';
+    app.innerHTML=`<div style="max-width:380px;margin:40px auto"><div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <span style="font-weight:500;font-size:16px">Settle pick</span>
+        <button style="background:none;border:none;cursor:pointer;color:var(--t2);font-size:22px;line-height:1;padding:0" onclick="EL.closeSettle()">&#215;</button>
+      </div>
+      <div style="font-size:13px;font-weight:500;margin-bottom:3px">${esc(p.bet)}</div>
+      <div style="font-size:12px;color:var(--t2);margin-bottom:18px">${esc(p.game)}</div>
+      <div style="display:flex;gap:8px">${['W','L','P'].map(r=>`<button class="rbtn${cur===r?' '+r:''}" onclick="EL.settle('${p.id}','${r}')">${r==='W'?'Win':r==='L'?'Loss':'Push'}</button>`).join('')}</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="EL.closeSettle()">Cancel</button></div>
+    </div></div>`;
+    return;
+  }
+
+  const settled=st.history.filter(p=>p.result);
+  const W=settled.filter(p=>p.result==='W').length;
+  const L=settled.filter(p=>p.result==='L').length;
+  const P=settled.filter(p=>p.result==='P').length;
+  const pnl=settled.reduce((s,p)=>{if(p.result==='W')return s+FLAT*(tD(p.line)-1);if(p.result==='L')return s-FLAT;return s;},0);
+  const hasPF=(W+L+P)>0;
+
+  const cands=st.picks?.candidates||[];
+  const modelResults=st.picks?.modelResults||{};
+
+  // ── Competition display logic ──────────────────────────────────────────────
+  // Group model results by the pick each model chose. Multiple models can
+  // choose the same pick (consensus) or different picks (competition).
+  const heroGroups={};
+  Object.entries(modelResults).forEach(([mid,res])=>{
+    const pid=res.topPickId;
+    const pick=cands.find(c=>c.id===pid);
+    if(!pick) return;
+    if(!heroGroups[pid]) heroGroups[pid]={pick,endorsements:[]};
+    heroGroups[pid].endorsements.push({
+      modelId:mid, modelName:MODELS[mid]?.name||mid,
+      confidence:res.confidence||'MEDIUM', reasoning:res.reasoning||''
+    });
+  });
+  // Sort heroes: most endorsements first, then by EV
+  const heroes=Object.values(heroGroups).sort((a,b)=>
+    b.endorsements.length-a.endorsements.length||b.pick.ev-a.pick.ev);
+  // If no models have run yet, surface the math top pick as default hero
+  const displayHeroes=heroes.length>0?heroes:
+    (cands.length&&!st.aiLoading?[{pick:cands[0],endorsements:[]}]:[]);
+
+  // Failed model messages — shown once above hero cards, not on each card
+  const failedModelMsgs=(st.workerModels||[])
+    .filter(id=>st.aiStatuses[id]&&st.aiStatuses[id].startsWith('error'))
+    .map(id=>{
+      const errMsg=st.aiStatuses[id].replace('error: ','');
+      const detail=errMsg&&errMsg!=='No result returned'?` <span style="opacity:.7">(${esc(errMsg)})</span>`:'';
+      return `<div style="background:var(--rebg);border:.5px solid var(--rebd);border-radius:6px;padding:9px 14px;font-size:12px;color:var(--re);margin-bottom:8px">${esc(MODELS[id]?.name||id)} could not make a recommendation this run.${detail}</div>`;
+    })
+    .join('');
+
+  // History rendered by rHistory() below
+
+  const hasKeys=Object.keys(LS.get('embet_keys')||{}).length>0;
+  const noKeyNote=!hasKeys?`<div style="margin-top:10px;padding:10px 12px;background:var(--ambg);border:.5px solid var(--ambd);border-radius:6px;font-size:12px;color:var(--am)">Add an AI provider key via the settings icon to enable AI analysis and model comparison.</div>`:'';
+
+  const d=st.picks?.diag;
+  const diagHtml=d?`<div class="diag">
+    <div style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--t2);margin-bottom:8px;font-family:var(--sans)">Scan diagnostic</div>
+    <div>Sports scanned: <span class="${d.sports>0?'ok':'fail'}">${d.sports}</span></div>
+    <div>Games returned by API: <span class="${d.gamesRaw>0?'ok':'fail'}">${d.gamesRaw}</span></div>
+    <div>Future games (not yet started): <span class="${d.gamesUpcoming>0?'ok':'warn'}">${d.gamesUpcoming}</span></div>
+    <div>Markets with fair value: <span class="${d.mktsWithFair>0?'ok':'fail'}">${d.mktsWithFair}</span></div>
+    <div>Pinnacle seen: <span class="${d.pinSeen?'ok':'warn'}">${d.pinSeen?'yes':'no &mdash; consensus-only'}</span></div>
+    <div>Best EV found (need &ge;${(MIN_EV*100).toFixed(1)}%): <span class="${d.bestEV>=MIN_EV?'ok':d.bestEV>0?'warn':'fail'}">${d.bestEV>0?fEV(d.bestEV):'none'}</span></div>
+    <div>Suppressed as artifacts (EV &gt;${(SANITY_EV*100).toFixed(0)}%): <span class="${d.suppressed>0?'warn':'ok'}">${d.suppressed}</span></div>
+  </div>`:'';
+
+  const errHint=st.err&&(st.err.toLowerCase().includes('fetch')||st.err.toLowerCase().includes('network'))?`<div style="margin-top:10px;font-size:12px;color:var(--t2)">emBET needs direct access to the-odds-api.com. Host at mrkobot.github.io/embet.</div>`:'';
+
+  app.innerHTML=`
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+    <div style="font-size:34px;font-weight:800;letter-spacing:-1.2px">em<span style="color:var(--ac)">BET</span></div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="font-size:12px;color:var(--t2)">${new Date().toLocaleDateString('en-US',{weekday:'short',month:'long',day:'numeric',year:'numeric'})}</div>
+      <button class="gear-btn" onclick="EL.openSettings()" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  ${rModelHeader()}
+
+  <div style="font-size:13px;font-weight:500;color:var(--t3);margin-bottom:24px;min-height:18px">
+    ${st.picks?`Scanned at ${new Date(st.picks.generatedAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})} &middot; ${st.picks.total} qualifying plays &middot; Refreshes daily at 6AM Pacific`:st.loading?'Scanning active lines&hellip;':'Refreshes daily at 6AM Pacific'}
+    ${st.picks?.aiAnalyzedAt?` &middot; Models analyzed at ${new Date(st.picks.aiAnalyzedAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}`:st.aiLoading?' &middot; Models analyzing&hellip;':''}
+  </div>
+
+  ${st.err?`<div style="background:var(--rebg);color:var(--re);border:.5px solid var(--rebd);border-radius:var(--r);padding:14px;margin-bottom:12px;line-height:1.6">
+    <div style="font-weight:500;margin-bottom:3px">Could not fetch odds</div>
+    <div style="font-size:13px">${esc(st.err)}</div>${errHint}
+  </div>`:''}
+
+  ${st.loading&&!st.picks?`<div style="text-align:center;padding:80px 0;color:var(--t2)">
+    <div class="mono" style="font-size:18px;letter-spacing:6px;color:var(--t3);margin-bottom:14px">&middot;&middot;&middot;</div>
+    <div style="font-size:13px">Scanning active lines for outliers</div>
+  </div>`:''}
+
+  ${!st.loading&&!cands.length&&!st.err?`<div style="padding:20px 0">
+    <div style="font-size:15px;font-weight:500;margin-bottom:4px">No qualifying plays found</div>
+    <div style="font-size:13px;color:var(--t2)">Nothing cleared the ${(MIN_EV*100).toFixed(1)}% EV threshold. Diagnostic below shows where the chain broke.</div>
+    ${diagHtml}
+  </div>`:''}
+
+  ${failedModelMsgs}
+  ${displayHeroes.map(h=>rHero(h.pick,h.endorsements)).join('')}
+  ${rPool(cands)}
+
+  ${cands.length?`<div class="card" style="font-size:13px;line-height:1.8;margin-top:4px">
+    <div class="lbl" style="margin-bottom:6px">Track record since ${START}</div>
+    ${hasPF
+      ?`<span style="font-weight:800;font-size:15px">${W}W&thinsp;&mdash;&thinsp;${L}L${P>0?`&thinsp;&mdash;&thinsp;${P}P`:''}</span>
+        &ensp;&middot;&ensp;<span class="mono" style="font-weight:500;color:${pnl>=0?'var(--gr)':'var(--re)'}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span>
+        <span style="color:var(--t2)"> at $${FLAT} flat</span>`
+      :`<span style="color:var(--t2)">No results yet &mdash; settle picks after games finish.</span>`}
+  </div>`:''}
+
+  ${rHistory()}
+  ${rLeaderboard()}
+  `;
+}
+
+// ── Event handlers ────────────────────────────────────────────────────────────
+window.EL={
+  openSettings(){st.showSettings=true;render();},
+  closeSettings(){
+    st.showSettings=false;
+    if(getAK()&&!st.picks){ st.err='';st.loading=true;render();scan(); }
+    else render();
+  },
+  openSettle(id){st.settleId=id;render();},
+  closeSettle(){st.settleId=null;render();},
+  toggleDate(d){st.histExpanded[d]=!st.histExpanded[d];render();},
+  saveKey(id,val){
+    const k=LS.get('embet_keys')||{};
+    if(val.trim()) k[id]=val.trim(); else delete k[id];
+    LS.set('embet_keys',k);
+  },
+  clearKey(id){
+    const k=LS.get('embet_keys')||{};
+    delete k[id]; LS.set('embet_keys',k); render();
+  },
+  saveWorkerUrl(val){
+    const url=val.trim().replace(/\/+$/,'');
+    LS.set('embet_worker_url',url);
+    if(url) syncWorkerConfiguration().then(()=>render());
+  },
+  clearWorkerUrl(){
+    LS.set('embet_worker_url','');
+    st.workerModels=null; st.modelVersions={}; render();
+  },
+  async settle(id,result){
+    const cands=st.picks?.candidates||[];
+    const pick=[...cands,...st.history].find(p=>p&&p.id===id);
+    if(!pick) return;
+    const done={...pick,result,settledAt:new Date().toISOString()};
+    const i=st.history.findIndex(h=>h.id===id);
+    if(i>=0) st.history[i]=done; else st.history.push(done);
+    LS.set('embet_history',st.history);
+    st.settleId=null; render();
+  },
+  toggleGateTutorial(){
+    const el=document.getElementById('gate-tutorial');
+    const arrow=document.getElementById('gate-arrow');
+    if(el&&arrow){ el.style.display=el.style.display==='none'?'block':'none'; arrow.innerHTML=el.style.display==='none'?'&#x25bc;':'&#x25b2;'; }
+  },
+  copyWorkerCode(){
+    const code=document.getElementById('worker-code-block')?.textContent||'';
+    navigator.clipboard?.writeText(code).then(()=>{
+      const btn=document.getElementById('copy-btn');
+      if(btn){ btn.textContent='Copied'; setTimeout(()=>btn.textContent='Copy',2000); }
+    });
+  },
+  saveGate(){
+    const odds=document.getElementById('gate-odds')?.value.trim();
+    const worker=document.getElementById('gate-worker')?.value.trim().replace(/\/+$/,'');
+    if(!odds){ alert('Odds API key is required.'); return; }
+    const k=LS.get('embet_keys')||{};
+    k.oddsapi=odds; LS.set('embet_keys',k);
+    if(worker) LS.set('embet_worker_url',worker);
+    document.getElementById('gate').style.display='none';
+    if(worker){ syncWorkerConfiguration().then(()=>{ st.loading=true;render();scan(); }); }
+    else { st.loading=true;render();scan(); }
+  }
+};
+
+// ── Outcome resolution ───────────────────────────────────────────────────────
+function resolveOutcome(pick,game){
+  const sc={};
+  for(const s of (game.scores||[])) sc[s.name]=parseFloat(s.score);
+  const home=game.home_team, away=game.away_team;
+  const hs=sc[home], as=sc[away];
+  if(hs==null||as==null||isNaN(hs)||isNaN(as)) return null;
+  if(pick.mkt==='ML'){
+    if(hs===as) return 'P';
+    const winner=hs>as?home:away;
+    return winner===pick.bet?'W':'L';
+  } else if(pick.mkt==='Total'){
+    const total=hs+as;
+    const ptM=pick.bet.match(/\(([+-]?[\d.]+)\)/);
+    if(!ptM) return null;
+    const line=parseFloat(ptM[1]);
+    const isOver=pick.bet.startsWith('Over');
+    if(total===line) return 'P';
+    return (isOver?total>line:total<line)?'W':'L';
+  } else if(pick.mkt==='Spread'){
+    const ptM=pick.bet.match(/\(([+-]?[\d.]+)\)/);
+    if(!ptM) return null;
+    const spread=parseFloat(ptM[1]);
+    const betTeam=pick.bet.replace(/\s*\([^)]+\)$/,'').trim();
+    const isHome=betTeam===home;
+    const isAway=betTeam===away;
+    if(!isHome&&!isAway) return null;
+    const betS=isHome?hs:as, oppS=isHome?as:hs;
+    const adj=betS+spread;
+    if(adj===oppS) return 'P';
+    return adj>oppS?'W':'L';
+  }
+  return null;
+}
+
+async function autoSettle(){
+  const now=new Date();
+  const needsSettle=st.history.filter(p=>
+    !p.result&&
+    new Date(p.commenceTime)<now&&
+    p.surfacedDate!==today()&&
+    p.sportKey
+  );
+  if(!needsSettle.length) return false;
+
+  // Group by sportKey — one scores call per sport
+  const bySport={};
+  for(const p of needsSettle)(bySport[p.sportKey]||=[]).push(p);
+
+  let changed=false;
+  for(const [sportKey,picks] of Object.entries(bySport)){
+    try{
+      const url=new URL(`${OB_BASE}/sports/${sportKey}/scores/`);
+      url.searchParams.set('apiKey',getAK());
+      url.searchParams.set('daysFrom','3');
+      const res=await fetch(url.toString());
+      if(!res.ok) continue;
+      const scores=await res.json();
+      for(const pick of picks){
+        const game=scores.find(g=>g.completed&&g.commence_time===pick.commenceTime);
+        if(!game) continue;
+        const result=resolveOutcome(pick,game);
+        if(!result) continue;
+        pick.result=result;
+        pick.settledAt=new Date().toISOString();
+        pick.autoSettled=true;
+        changed=true;
+      }
+    }catch(e){console.warn(`Auto-settle ${sportKey}:`,e.message);}
+  }
+  return changed;
+}
+
+// ── Scan ──────────────────────────────────────────────────────────────────────
+async function scan(){
+  if(!getAK()){
+    st.err='Add your Odds API key in settings (gear icon) to get started.';
+    st.loading=false; render(); EL.openSettings(); return;
+  }
+  const diag={sports:0,gamesRaw:0,gamesUpcoming:0,mktsWithFair:0,pinSeen:false,bestEV:0,suppressed:0};
+  const allGames=[];
+  try{
+    const sRes=await fetch(`${OB_BASE}/sports/?apiKey=${getAK()}`);
+    if(!sRes.ok) throw new Error(`Sports list error ${sRes.status}.`);
+    const allS=await sRes.json();
+    const active=allS.filter(s=>s.active&&!s.has_outrights);
+    const sorted=[...PRI.filter(k=>active.find(s=>s.key===k)),...active.filter(s=>!PRI.includes(s.key)).map(s=>s.key)].slice(0,9);
+    diag.sports=sorted.length;
+    const opps=[];
+    const now=new Date();
+
+    for(const sport of sorted){
+      const url=new URL(`${OB_BASE}/sports/${sport}/odds/`);
+      url.searchParams.set('apiKey',getAK());
+      url.searchParams.set('regions','us');
+      url.searchParams.set('markets','h2h,spreads,totals');
+      url.searchParams.set('oddsFormat','american');
+      url.searchParams.set('bookmakers',BKS);
+      const res=await fetch(url.toString());
+      if(!res.ok){if(res.status===429) throw new Error('API quota reached.');continue;}
+      const games=await res.json();
+      const sportLbl=allS.find(s=>s.key===sport)?.title||sport;
+      diag.gamesRaw+=games.length;
+      games.forEach(g=>allGames.push(g)); // collect ALL games for CLV capture
+
+      for(const g of games){
+        if(new Date(g.commence_time)<=now) continue;
+        diag.gamesUpcoming++;
+        const pin=g.bookmakers.find(b=>b.key==='pinnacle');
+        if(pin) diag.pinSeen=true;
+
+        for(const mkt of ['h2h','spreads','totals']){
+          const pm=pin?.markets?.find(m=>m.key===mkt);
+          let fm=null,sharpRef=false,poolSize=0;
+
+          if(pm?.outcomes?.length===2){
+            const[a,b]=pm.outcomes;
+            const[fa,fb]=shinProb(iP(a.price),iP(b.price));
+            fm={[oKey(a.name,a.point)]:fa,[oKey(b.name,b.point)]:fb};
+            sharpRef=true; diag.mktsWithFair++;
+          }else{
+            const pools={};
+            for(const bm of g.bookmakers){
+              const m2=bm.markets?.find(m=>m.key===mkt);
+              if(!m2?.outcomes||m2.outcomes.length!==2) continue;
+              for(const o of m2.outcomes){const k=oKey(o.name,o.point);if(!pools[k])pools[k]={point:o.point,prices:[]};pools[k].prices.push(o.price);}
+            }
+            const byPoint={};
+            for(const k in pools){const pk=String(pools[k].point);(byPoint[pk]||=[]).push(k);}
+            let bestKeys=null,bestCount=0;
+            for(const pk in byPoint){const keys=byPoint[pk];if(keys.length!==2)continue;const count=keys.reduce((s,k)=>s+pools[k].prices.length,0);if(count>bestCount){bestCount=count;bestKeys=keys;}}
+            if(bestKeys){
+              const[k1,k2]=bestKeys;
+              if(pools[k1].prices.length>=MIN_CB&&pools[k2].prices.length>=MIN_CB){
+                const pA=robustProb(pools[k1].prices),pB=robustProb(pools[k2].prices);
+                if(pA!=null&&pB!=null){const[sA,sB]=shinProb(pA,pB);fm={[k1]:sA,[k2]:sB};poolSize=Math.min(pools[k1].prices.length,pools[k2].prices.length);diag.mktsWithFair++;}
+              }
+            }
+          }
+          if(!fm) continue;
+
+          const mktLbl=mkt==='h2h'?'ML':mkt==='spreads'?'Spread':'Total';
+          for(const bm of g.bookmakers){
+            if(bm.key==='pinnacle') continue;
+            const m=bm.markets?.find(m=>m.key===mkt);
+            if(!m?.outcomes) continue;
+            for(const o of m.outcomes){
+              const fair=fm[oKey(o.name,o.point)];
+              if(fair==null) continue;
+              const bookImplied=iP(o.price);
+              const gap=fair-bookImplied;
+              const ev=cEV(fair,o.price);
+              if(ev>diag.bestEV) diag.bestEV=ev;
+              if(ev>=SANITY_EV){diag.suppressed++;continue;}
+              if(ev<MIN_EV) continue;
+              const pt=o.point!=null?` (${o.point>0?'+':''}${o.point})`:'';
+              const pid=pickId(g.commence_time,mktLbl,o.name,o.point,bm.key);
+              opps.push({id:pid,sport:sportLbl,sportKey:sport,game:`${g.away_team} @ ${g.home_team}`,commenceTime:g.commence_time,mkt:mktLbl,bet:`${o.name}${pt}`,book:bm.title||bm.key,line:o.price,bookImplied,fair,gap,ev,booksInPool:sharpRef?0:poolSize,method:sharpRef?'sharp':'consensus',pinnacleDeep:PINNACLE_DEEP.has(sport),result:null});
+            }
+          }
+        }
+      }
+    }
+
+    // CLV capture for open picks within 3h of their game
+    const clvChanged=captureClosingLines(allGames);
+
+    // Auto-settle picks from prior days whose games have completed
+    const settleChanged=await autoSettle();
+    if(clvChanged||settleChanged) LS.set('embet_history',st.history);
+
+    opps.sort((a,b)=>b.ev-a.ev+(b.method==='sharp'?0.001:0)-(a.method==='sharp'?0.001:0));
+    const seen=new Set();
+    const deduped=opps.filter(o=>{if(seen.has(o.id))return false;seen.add(o.id);return true;});
+    const candidates=deduped.slice(0,MAX_AI_POOL);
+
+    // Persist candidates to history (deterministic IDs prevent duplicates)
+    let histChanged=false;
+    for(const c of candidates){
+      if(!st.history.find(h=>h.id===c.id)){
+        st.history.push({...c,surfacedDate:today()});
+        histChanged=true;
+      }
+    }
+    if(histChanged) LS.set('embet_history',st.history);
+
+    st.picks={date:today(),generatedAt:new Date().toISOString(),candidates,modelResults:{},consensusTopId:candidates[0]?.id,consensusVotes:0,totalModels:0,primaryModelId:null,aiResult:null,total:deduped.length,diag};
+    LS.set(CACHE_VER+today(),st.picks);
+    st.loading=false;
+    render();
+    if(candidates.length) runAllModels(candidates);
+  }catch(e){
+    st.err=e.message||'Failed to fetch odds.';
+    st.loading=false;
+    if(!st.picks) st.picks={date:today(),generatedAt:new Date().toISOString(),candidates:[],modelResults:{},total:0,diag};
+    render();
+  }
+}
+
+// ── Worker code string — displayed in gate for copy/paste ───────────────────
+const WORKER_CODE = `// emBET Cloudflare Worker — pure router. No model versions, no provider
+// defaults, no tuning opinions live here, on purpose: this file should never
+// need to change when a model gets bumped or a setting gets tuned. Everything
+// about WHICH model and WHAT settings comes from the request body, decided in
+// index.html (see MODEL_CONFIG there). This file only knows the one thing
+// that's actually infrastructure: how to translate a generic call into each
+// provider's specific URL/auth/body shape, and where the secret keys live.
+//
+// Environment variables (set in Cloudflare dashboard → Settings → Variables):
+//   ANTHROPIC_KEY  — from console.anthropic.com
+//   OPENAI_KEY     — from platform.openai.com
+//   GEMINI_KEY     — from aistudio.google.com/apikey
+//
+// If you're updating an existing deployment from an older version of this
+// file, this one redeploy is required — the request/response shape changed.
+// After this, model and tuning changes only ever require updating
+// index.html, never this file.
+
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+export default {
+  async fetch(request, env) {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: CORS });
+    }
+
+    const url = new URL(request.url);
+    const json = (data, status = 200) =>
+      new Response(JSON.stringify(data), {
+        status,
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      });
+
+    // ── /api/config ────────────────────────────────────────────────────────────
+    // Reports which provider keys are configured. Nothing else — no model
+    // strings, no search flags, no tuning. The app already knows what it
+    // wants to ask for; it only needs to know which providers are reachable.
+    if (url.pathname === '/api/config') {
+      return json({
+        activeProviders: {
+          anthropic: !!env.ANTHROPIC_KEY,
+          openai:    !!env.OPENAI_KEY,
+          google:    !!env.GEMINI_KEY,
+        },
+      });
+    }
+
+    // ── /api/analyze ───────────────────────────────────────────────────────────
+    // Pure pass-through: every decision (model, search, token budget,
+    // reasoning effort, thinking level) is supplied by the caller. This
+    // Worker only translates the request into each provider's specific shape.
+    if (url.pathname === '/api/analyze' && request.method === 'POST') {
+      const body = await request.json();
+      try {
+        const text = await callProvider(body, env);
+        return json({ text });
+      } catch (e) {
+        return json({ error: e.message }, 500);
+      }
+    }
+
+    return new Response('Not found', { status: 404, headers: CORS });
+  }
+};
+
+async function callProvider(req, env) {
+  const { provider, model, systemPrompt, userPrompt, wantsSearch,
+          searchToolType, maxOutputTokens, reasoningEffort, thinkingLevel } = req;
+
+  if (!provider) throw new Error('Missing provider');
+  if (!model) throw new Error('Missing model');
+  if (!maxOutputTokens) throw new Error('Missing maxOutputTokens');
+
+  // ── Anthropic — Messages API ───────────────────────────────────────────────
+  if (provider === 'anthropic') {
+    if (wantsSearch && !searchToolType) throw new Error('wantsSearch is true but searchToolType is missing');
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': env.ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model, max_tokens: maxOutputTokens,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        tools: wantsSearch ? [{ type: searchToolType, name: 'web_search' }] : undefined,
+      }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error.message);
+    // With tools enabled, content can include tool_use/tool_result blocks
+    // alongside text — concatenate only the text blocks for the final answer.
+    const textBlocks = (d.content || []).filter(b => b.type === 'text').map(b => b.text);
+    return textBlocks.join('\\n');
+  }
+
+  // ── OpenAI — Responses API ─────────────────────────────────────────────────
+  if (provider === 'openai') {
+    const body = {
+      model,
+      input: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_output_tokens: maxOutputTokens,
+    };
+    if (wantsSearch) body.tools = [{ type: 'web_search' }];
+    if (reasoningEffort) body.reasoning = { effort: reasoningEffort };
+
+    const r = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': \`Bearer \${env.OPENAI_KEY}\` },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error.message);
+
+    // Responses API returns an array of output items — find the message item
+    // and pull its text content. Tool-call items (web_search_call) are skipped.
+    const messageItem = (d.output || []).find(item => item.type === 'message');
+    const text = messageItem?.content?.find(c => c.type === 'output_text')?.text;
+    if (!text) throw new Error('No text in OpenAI response');
+    return text;
+  }
+
+  // ── Google — generateContent ───────────────────────────────────────────────
+  if (provider === 'google') {
+    const generationConfig = { maxOutputTokens };
+    if (thinkingLevel) generationConfig.thinkingConfig = { thinkingLevel };
+    const body = {
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ parts: [{ text: userPrompt }] }],
+      generationConfig,
+    };
+    if (wantsSearch) body.tools = [{ google_search: {} }];
+
+    const r = await fetch(
+      \`https://generativelanguage.googleapis.com/v1beta/models/\${model}:generateContent?key=\${env.GEMINI_KEY}\`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    const d = await r.json();
+    if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
+    // With search grounding, parts can include groundingMetadata alongside
+    // text — pull only the text parts.
+    const parts = d.candidates?.[0]?.content?.parts || [];
+    const text = parts.filter(p => p.text).map(p => p.text).join('\\n');
+    if (!text) throw new Error('No text in Gemini response');
+    return text;
+  }
+
+  throw new Error(\`Unknown provider: \${provider}\`);
+}
+`;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+function init(){
+  const h=LS.get('embet_history');
+  if(h) st.history=h;
+
+  // Show gate if no Odds API key
+  if(!getAK()){
+    st.loading=false;
+    document.getElementById('gate').style.display='flex';
+    // Populate worker code block for display
+    const codeEl=document.getElementById('worker-code-block');
+    if(codeEl) codeEl.textContent=WORKER_CODE;
+    render();
+    return;
+  }
+
+  const runApp=()=>{
+    const cached=LS.get(CACHE_VER+today());
+    if(cached&&Array.isArray(cached.candidates)&&!isStale(cached.generatedAt)){
+      st.picks=cached;
+      st.loading=false;
+      render();
+      // Run any models that haven't run yet today
+      if(cached.candidates.length&&st.workerModels?.length){
+        const done=Object.keys(cached.modelResults||{});
+        const missing=st.workerModels.filter(id=>!done.includes(id));
+        if(missing.length) runAllModels(cached.candidates,missing);
+      }
+    } else {
+      render();
+      scan();
+    }
+  };
+
+  const workerUrl=getWorkerUrl();
+  if(workerUrl){
+    syncWorkerConfiguration().then(runApp);
+  } else {
+    runApp();
+  }
+}
+
+init();
+</script>
+</body>
+</html>
