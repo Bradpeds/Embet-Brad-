@@ -1007,8 +1007,8 @@ function render() {
       <input class="inp" id="worker-url-inp" type="text" placeholder="https://your-worker.username.workers.dev" value="${esc(getWorkerUrl())}"
         style="width:100%;padding:8px 10px;border:0.5px solid var(--border-md);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--sans);box-sizing:border-box" onchange="EL.saveWorkerUrl(this.value)" />
       <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">Secure proxy used for Claude/GPT/Gemini/DeepSeek calls. Keep API keys in the worker, not in this HTML file.</div>
-      <input class="inp" id="worker-secret-inp" type="password" placeholder="Worker secret (EMBET_SECRET you set in Cloudflare)" value=""
-        style="width:100%;padding:8px 10px;border:0.5px solid var(--border-md);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--sans);box-sizing:border-box;margin-top:8px" onchange="EL.saveWorkerSecret(this.value)" />
+      <input class="inp" id="worker-secret-inp" type="password" placeholder="Worker secret (EMBET_SECRET you set in Cloudflare)" value="${esc(LS.get('embet_worker_secret') || '')}"
+        style="width:100%;padding:8px 10px;border:0.5px solid var(--border-md);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--sans);box-sizing:border-box;margin-top:8px" oninput="EL.saveWorkerSecret(this.value)" />
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">
         ${Object.values(MODELS).map(m => `<label style="font-size:11px;color:var(--text2);border:0.5px solid var(--border);border-radius:5px;padding:4px 7px;cursor:pointer"><input type="checkbox" ${getAiModels().includes(m.id)?'checked':''} onchange="EL.toggleAiModel('${m.id}', this.checked)"/> ${m.name}</label>`).join('')}
       </div>
