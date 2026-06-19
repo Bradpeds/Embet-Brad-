@@ -154,6 +154,23 @@
     .rbtn.P { background: var(--amber-bg);  color: var(--amber);  border-color: var(--amber-border);  font-weight: 500; }
     .tbl { width: 100%; border-collapse: collapse; }
     .tbl td { padding: 8px 14px; border-bottom: 0.5px solid var(--border); vertical-align: middle; }
+    .ai-card {
+      background: var(--surface);
+      border: 0.5px solid var(--accent-border);
+      border-left: 3px solid var(--accent);
+      border-radius: 0;
+      padding: 18px 20px;
+      margin-bottom: 12px;
+    }
+    .ai-pick-row {
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.55;
+    }
     .empty-window {
       background: var(--surface);
       border: 0.5px solid var(--border);
@@ -171,7 +188,7 @@
   <div style="text-align:center;margin-top:44px;font-size:11px;color:var(--text3);line-height:1.8">
     emBET scans live lines across DraftKings, FanDuel, BetMGM, Caesars, and others daily.<br>
     The edge shown is the gap between a book's price and Pinnacle's, where Pinnacle is available — de-vigged with Shin's method (corrects for favorite-longshot bias) and filtered to a 1.5%+ gap. It's a measure of price disagreement against a sharp reference, not a prediction that the bet wins more often than it's priced to.<br>
-    This finds disagreement between books, not independent predictions — it doesn't know about injuries, weather, or lineups. Average CLV over a large sample is the real test of whether that disagreement is worth anything; any single result is noise.
+    Layer 1 finds disagreement between books; Layer 2 lets multiple AIs choose one of the top four math-filtered finalists. Average CLV over a large sample remains the real test of whether the full system is finding actual edge; any single result is noise.
   </div>
 </div>
 <script>
@@ -189,7 +206,11 @@ const DEFAULT_MIN_EDGE   = 0.015; // min modeled edge before a play is surfaced.
 const DEFAULT_TOP_N      = 3;     // how many of the best-EV plays to surface per time window (near / future), ranked by edge. More picks captures more of a day's total expected value but means more bets to track and more variance per day. Doesn't cost extra API calls — every opportunity is already fetched in one scan regardless of how many get shown.
 const MIN_EDGE_FLOOR = 0.005, MIN_EDGE_CEIL = 0.05; // guardrails on the adjustable edge threshold
 const TOP_N_FLOOR = 1, TOP_N_CEIL = 20;             // guardrails on picks-per-window
-const SANITY_EDGE = 0.20; // real sharp-vs-soft mispricings essentially never exceed ~20%. Anything above this is far more likely a data/matching issue (e.g. mismatched lines, a stale quote) than a genuine opportunity — those get pulled out of the main picks and flagged separately instead of being presented as something to bet.
+const SANITY_EDGE = 0.20;
+// Minimum CLV-evaluated picks a model needs before its leaderboard score is
+// shown. Below this, the sample is too small to mean anything — we show
+// "X/10 needed" instead of a misleadingly precise number.
+const MIN_SCORED = 10; // real sharp-vs-soft mispricings essentially never exceed ~20%. Anything above this is far more likely a data/matching issue (e.g. mismatched lines, a stale quote) than a genuine opportunity — those get pulled out of the main picks and flagged separately instead of being presented as something to bet.
 const KELLY_FRACTION = 0.25; // quarter-Kelly. Full Kelly assumes the edge estimate is exactly right -- with one sharp reference book and a de-vig model, it usually isn't exactly right, and full Kelly is brutal on bankroll when the edge is overestimated. A quarter (sometimes half) of full Kelly is the standard real-world haircut for that uncertainty.
 const SAMPLE_EARLY       = 30;  // below this, results are close to pure noise
 const SAMPLE_DEVELOPING  = 100; // below this, treat any trend as provisional
@@ -198,6 +219,16 @@ const CLAMP = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 // Live setting accessors — read from state, fall back to defaults.
 const minEdge = () => st.settings?.minEdge ?? DEFAULT_MIN_EDGE;
 const topN    = () => st.settings?.topN    ?? DEFAULT_TOP_N;
+const AI_FINALISTS = 4; // Layer 2: the AI panel must choose from exactly the top four math-filtered finalists.
+const DEFAULT_AI_MODELS = ['claude','gpt4o','gemini','deepseek'];
+const MODELS = {
+  claude:   { id:'claude',   name:'Claude',   provider:'anthropic', model:'claude-3-5-sonnet-20240620', hasSearch:true  },
+  gpt4o:    { id:'gpt4o',    name:'GPT-4o',   provider:'openai',    model:'gpt-4o',                     hasSearch:false },
+  gemini:   { id:'gemini',   name:'Gemini',   provider:'google',    model:'gemini-2.5-flash',           hasSearch:false },
+  deepseek: { id:'deepseek', name:'DeepSeek', provider:'deepseek',  model:'deepseek-chat',              hasSearch:false }
+};
+const getWorkerUrl = () => LS.get('embet_worker_url') || '';
+const getAiModels  = () => LS.get('embet_ai_models') || DEFAULT_AI_MODELS;
 const PRI = [
   'baseball_mlb','basketball_nba','icehockey_nhl',
   'americanfootball_nfl','americanfootball_ncaaf',
@@ -357,8 +388,265 @@ function confidenceLabel(c) {
 }
 
 
+function pickRankScore(o) {
+  const edgeNorm = CLAMP((o?.edge || 0) / SANITY_EDGE, 0, 1);
+  const c = (o?.confidence != null) ? o.confidence : (o?.confMeta ? quantConfidence(o).score : 0.5);
+  return 0.60 * edgeNorm + 0.40 * c;
+}
+
+function finalistPoolFromPicks(picks) {
+  const pool = [...(picks?.near || []), ...(picks?.future || [])]
+    .filter(p => p && !p.suspicious)
+    .sort((a,b) => pickRankScore(b) - pickRankScore(a));
+  const seen = new Set();
+  const out = [];
+  for (const p of pool) {
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    out.push(p);
+    if (out.length >= AI_FINALISTS) break;
+  }
+  return out;
+}
+
+function buildPrompts(candidates, hasSearch) {
+  const searchInstr = hasSearch
+    ? 'You may use live search if your runtime supports it. Check only high-leverage context that could invalidate or strengthen a mathematically identified edge: injuries, lineups, weather, starting pitchers/goalies, schedule spots, and material line movement.'
+    : 'Use your broader learned context and reasoning patterns, but do not invent live news. Treat missing live injury/lineup/weather data as uncertainty, not evidence.';
+
+  const systemPrompt = `You are Layer 2 of emBET: an AI adjudication panel sitting ABOVE the math, not replacing it.
+
+Architecture:
+Layer 1 has already scanned the market, de-vigged prices, filtered for a modeled price gap above the edge floor, ranked candidates by edge plus structural confidence, and produced exactly ${AI_FINALISTS} finalists. These are price disagreements between books — not guaranteed wins, not known positive expected value, just mathematically identified gaps worth evaluating.
+Layer 2 must choose ONE of those finalists. Do not recommend anything outside the finalist pool. Do not re-run the sportsbook math. Your job is to decide which identified price gap looks most likely to be real — not a data artifact, stale quote, or a line that has already moved — after broader contextual reasoning.
+
+Use all available reasoning sources freely: market structure, sport context, public-team bias, schedule spots, injury/lineup/weather risk, sharp-vs-soft-book implications, and whether the edge looks robust or fragile. ${searchInstr}
+
+Return ONLY valid JSON. No markdown, no code fences, no prose outside JSON.
+{
+  "topPickId": "exact id from the finalist pool",
+  "confidence": "HIGH|MEDIUM|LOW",
+  "reasoning": "concise explanation of why this finalist has the most defensible price gap — market structure, context, and what makes it more trustworthy than the alternatives",
+  "risk": "main reason this could be wrong"
+}`;
+
+  const userPrompt = `Top ${AI_FINALISTS} math-filtered finalists:\n${JSON.stringify(candidates.map((c, i) => ({
+    finalistRank: i + 1,
+    id: c.id,
+    sport: c.sport,
+    game: c.game,
+    commenceTime: c.commenceTime,
+    market: c.mkt,
+    bet: c.bet,
+    book: c.book,
+    offeredLine: c.line,
+    referencePrice: c.fairOdds,
+    fairProb: c.fairProb,
+    edge: c.edge,
+    structuralConfidence: c.confidence ?? null,
+    sharpReference: c.sharp ? (c.pinnacleDeep ? 'Pinnacle deep market' : 'Pinnacle thin market') : 'Consensus fallback',
+    confidenceMeta: c.confMeta || null
+  })), null, 2)}`;
+
+  return { systemPrompt, userPrompt };
+}
+
+async function callModel(model, workerUrl, candidates) {
+  if (!workerUrl || !candidates?.length) return null;
+  const { systemPrompt, userPrompt } = buildPrompts(candidates, model.hasSearch);
+  const r = await fetch(`${workerUrl.replace(/\/$/, '')}/api/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Embet-Secret': LS.get('embet_worker_secret') || '' },
+    body: JSON.stringify({ provider: model.provider, model: model.model, systemPrompt, userPrompt })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error(d.error || `Worker returned ${r.status}`);
+  const raw = String(d.text || d.content || d.response || '').replace(/```json/gi, '').replace(/```/g, '').trim();
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No JSON object found in AI response');
+  const result = JSON.parse(match[0]);
+  if (!candidates.some(c => c.id === result.topPickId)) throw new Error('AI chose a pick outside the finalist pool');
+  return {
+    modelId: model.id,
+    modelName: model.name,
+    topPickId: result.topPickId,
+    confidence: result.confidence || 'MEDIUM',
+    reasoning: result.reasoning || 'Selected this finalist as the strongest blend of math and context.',
+    risk: result.risk || ''
+  };
+}
+
+function aiConsensus(modelResults) {
+  const vals = Object.values(modelResults || {}).filter(Boolean);
+  if (!vals.length) return null;
+  const counts = {};
+  vals.forEach(r => counts[r.topPickId] = (counts[r.topPickId] || 0) + 1);
+  const topId = Object.entries(counts).sort((a,b) => b[1] - a[1])[0]?.[0] || null;
+  return { topPickId: topId, votes: counts[topId] || 0, total: vals.length };
+}
+
+// --- Model leaderboard ---
+// Tracks, per AI model, which finalist it chose each time the panel ran, then
+// fills in the actual CLV once that pick's closing line gets captured later
+// (via captureClosing). This is the honest version of "which model is best":
+// no model gets a Leading/Competitive/Lagging label until it has MIN_SCORED
+// real, settled-CLV picks behind it. Below that, the UI just shows the count
+// so far -- never an invented or premature score.
+function recordModelPicks(modelResults) {
+  const perf = LS.get('embet_model_perf') || {};
+  for (const [modelId, r] of Object.entries(modelResults || {})) {
+    if (!r) continue;
+    if (!perf[modelId]) perf[modelId] = { modelName: r.modelName, picks: [] };
+    if (perf[modelId].picks.some(p => p.pickId === r.topPickId)) continue; // already recorded
+    perf[modelId].picks.push({
+      pickId: r.topPickId,
+      date: today(),
+      confidence: r.confidence || 'MEDIUM',
+      clv_pp: null,
+      clvLocked: false
+    });
+  }
+  LS.set('embet_model_perf', perf);
+}
+
+function updateModelLeaderboardCLV(pickId, clvFraction) {
+  const perf = LS.get('embet_model_perf') || {};
+  let changed = false;
+  for (const modelId in perf) {
+    const rec = perf[modelId].picks.find(p => p.pickId === pickId);
+    if (rec && !rec.clvLocked) {
+      rec.clv_pp = clvFraction * 100; // store as percentage points, matching fCLV's display unit
+      rec.clvLocked = true;
+      changed = true;
+    }
+  }
+  if (changed) LS.set('embet_model_perf', perf);
+}
+
+async function runAllModels(candidates, basePicks) {
+  const workerUrl = getWorkerUrl();
+  const activeIds = getAiModels().filter(id => MODELS[id]);
+  if (!workerUrl || !activeIds.length || candidates.length < 1) return;
+
+  st.aiLoading = true;
+  st.aiStatuses = {};
+  activeIds.forEach(id => st.aiStatuses[id] = 'loading');
+  render();
+
+  const settled = await Promise.allSettled(activeIds.map(id => callModel(MODELS[id], workerUrl, candidates)));
+  const modelResults = {};
+  settled.forEach((res, i) => {
+    const id = activeIds[i];
+    if (res.status === 'fulfilled' && res.value) {
+      modelResults[id] = res.value;
+      st.aiStatuses[id] = 'ok';
+    } else {
+      st.aiStatuses[id] = 'error';
+    }
+  });
+
+  const next = { ...(basePicks || st.picks), aiFinalists: candidates.map(c => c.id), modelResults, aiConsensus: aiConsensus(modelResults), aiGeneratedAt: new Date().toISOString() };
+  st.picks = next;
+  recordModelPicks(modelResults);
+  LS.set('embet_picks_' + today(), next);
+  st.aiLoading = false;
+  render();
+}
+
+function aiPanel() {
+  const finalists = finalistPoolFromPicks(st.picks);
+  const results = st.picks?.modelResults || {};
+  const vals = Object.values(results).filter(Boolean);
+  const consensus = st.picks?.aiConsensus || aiConsensus(results);
+  const workerUrl = getWorkerUrl();
+
+  if (!finalists.length) return '';
+  const byId = Object.fromEntries(finalists.map(p => [p.id, p]));
+  const finalistRows = finalists.map((p, i) => `<div class="ai-pick-row">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+      <div><span class="mono" style="color:var(--text3)">#${i+1}</span> <strong>${esc(p.bet)}</strong> <span style="color:var(--text2)">&middot; ${esc(p.game)}</span></div>
+      <span class="mono" style="color:var(--green);white-space:nowrap">${fE(p.edge)}</span>
+    </div>
+    <div style="color:var(--text3);margin-top:2px">${esc(p.book)} ${fO(p.line)} &middot; ${p.sharp ? (p.pinnacleDeep ? 'Pinnacle ref' : 'Pinnacle thin') : 'Consensus'} &middot; structural confidence ${(100*(p.confidence ?? 0)).toFixed(0)}%</div>
+  </div>`).join('');
+
+  const statusLine = Object.keys(MODELS).filter(id => getAiModels().includes(id)).map(id => {
+    const stt = st.aiStatuses[id];
+    const cls = stt === 'ok' ? 'success' : stt === 'error' ? 'danger' : stt === 'loading' ? 'warning' : 'neutral';
+    return bdg(cls, `${MODELS[id].name}${stt ? `: ${stt}` : ''}`);
+  }).join(' ');
+
+  const resultRows = vals.map(r => {
+    const p = byId[r.topPickId];
+    return `<div class="ai-pick-row" style="border-color:var(--accent-border)">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:4px">
+        <div><strong>${esc(r.modelName)}</strong> chose <strong>${esc(p?.bet || r.topPickId)}</strong></div>
+        ${bdg(r.confidence === 'HIGH' ? 'success' : r.confidence === 'LOW' ? 'warning' : 'info', r.confidence)}
+      </div>
+      <div style="color:var(--text2)">${esc(r.reasoning)}</div>
+      ${r.risk ? `<div style="color:var(--text3);margin-top:4px">Risk: ${esc(r.risk)}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  const consensusPick = consensus?.topPickId ? byId[consensus.topPickId] : null;
+  return `<div class="section-divider">Layer 2 — AI finalist adjudication</div>
+  <div class="ai-card">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px">
+      <div>
+        <div style="font-size:14px;font-weight:500;margin-bottom:3px">AI panel chooses from the top ${AI_FINALISTS} math-filtered finalists</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.6">The AIs cannot pick outside this pool. Layer 1 finds price disagreement; Layer 2 decides which finalist has the cleanest broader context.</div>
+      </div>
+      ${workerUrl ? `<button class="btn" style="font-size:11px;white-space:nowrap" onclick="EL.runAiPanel()">Run AI panel</button>` : `<button class="btn" style="font-size:11px;white-space:nowrap" onclick="EL.toggleSettings()">Add AI worker</button>`}
+    </div>
+    ${statusLine ? `<div style="margin-bottom:10px">${statusLine}</div>` : ''}
+    ${consensusPick ? `<div style="background:var(--accent-bg);border:0.5px solid var(--accent-border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:13px"><strong>Consensus:</strong> ${esc(consensusPick.bet)} &middot; ${esc(consensusPick.game)} <span class="mono" style="color:var(--green)">${fE(consensusPick.edge)}</span> <span style="color:var(--text2)">(${consensus.votes}/${consensus.total} model votes)</span></div>` : ''}
+    ${resultRows || (st.aiLoading ? `<div class="ai-pick-row">AI panel running…</div>` : `<div style="font-size:12px;color:var(--text3);margin-bottom:8px">No AI results yet. Add your Cloudflare worker URL in Settings, then run the panel.</div>`)}
+    <div style="margin-top:12px;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Current finalist pool</div>
+    ${finalistRows}
+  </div>`;
+}
+
+
+// Model leaderboard -- only renders once at least one model has any
+// recorded picks. Each row stays unscored ("X/10 needed") until it has
+// MIN_SCORED real settled-CLV picks; nothing here is ever a guess.
+function leaderboardPanel() {
+  const perf = LS.get('embet_model_perf') || {};
+  const ids = Object.keys(perf).filter(id => perf[id]?.picks?.length);
+  if (!ids.length) return '';
+
+  const rows = ids.map(id => {
+    const data = perf[id];
+    const evaluated = data.picks.filter(p => p.clvLocked);
+    const hasEnough = evaluated.length >= MIN_SCORED;
+    const avgCLV = evaluated.length ? evaluated.reduce((s,p) => s + p.clv_pp, 0) / evaluated.length : null;
+    const statusTxt = !hasEnough ? `${evaluated.length}/${MIN_SCORED} needed`
+                     : avgCLV > 1.0 ? 'Leading' : avgCLV > 0 ? 'Competitive' : 'Lagging';
+    const statusCls = !hasEnough ? 'neutral' : avgCLV > 1.0 ? 'success' : avgCLV > 0 ? 'info' : 'warning';
+    return `<div class="ai-pick-row">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>${esc(data.modelName || id)}</strong>
+        ${bdg(statusCls, statusTxt)}
+      </div>
+      <div style="color:var(--text3);margin-top:2px">
+        ${data.picks.length} picks chosen &middot; ${evaluated.length} settled${hasEnough ? ` &middot; avg CLV ${fCLV(avgCLV/100)}` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="section-divider">Model leaderboard</div>
+  <div class="ai-card">
+    <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:10px">
+      Tracks which finalist each AI model chose and how its picks actually settled against the closing line.
+      A model needs ${MIN_SCORED} settled picks before it gets a status label -- below that, it's too small a sample to mean anything.
+    </div>
+    ${rows}
+  </div>`;
+}
+
 // Format
 const fO    = o => o == null ? '—' : o > 0 ? `+${o}` : `${o}`;
+
 const fE    = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%`;
 const fCLV  = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
 const fDT   = iso => new Date(iso).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
@@ -381,7 +669,7 @@ const LS = {
 };
 
 // State
-const st = { loading:true, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false, bankroll:null, settings:{}, showSettings:false };
+const st = { loading:true, aiLoading:false, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false, bankroll:null, settings:{}, showSettings:false, aiStatuses:{}, workerUrl:'', aiModels:DEFAULT_AI_MODELS };
 
 function bdg(cls, text) {
   return `<span class="badge b-${cls||'neutral'}">${esc(String(text))}</span>`;
@@ -714,7 +1002,19 @@ function render() {
       <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">How many top plays to show in each window (near / future). More picks = more of the day's total EV captured, but more bets to track and more day-to-day variance. Doesn't use extra API calls. Default 3.</div>
     </div>
 
-    <div style="margin-top:16px;font-size:11px;color:var(--text3)">Both settings take effect on the next rescan. Picks-per-window is capped during the scan, so raising it shows more plays only after rescanning — that keeps your tracked record from retroactively gaining bets you never saw. <button class="btn" style="font-size:11px;padding:3px 10px;margin-left:6px" onclick="EL.retry()">Rescan now</button></div>
+    <div style="margin-top:18px;padding-top:16px;border-top:0.5px solid var(--border)">
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px">Layer 2 AI worker</div>
+      <input class="inp" id="worker-url-inp" type="text" placeholder="https://your-worker.username.workers.dev" value="${esc(getWorkerUrl())}"
+        style="width:100%;padding:8px 10px;border:0.5px solid var(--border-md);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--sans);box-sizing:border-box" onchange="EL.saveWorkerUrl(this.value)" />
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">Secure proxy used for Claude/GPT/Gemini/DeepSeek calls. Keep API keys in the worker, not in this HTML file.</div>
+      <input class="inp" id="worker-secret-inp" type="password" placeholder="Worker secret (EMBET_SECRET you set in Cloudflare)" value=""
+        style="width:100%;padding:8px 10px;border:0.5px solid var(--border-md);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--sans);box-sizing:border-box;margin-top:8px" onchange="EL.saveWorkerSecret(this.value)" />
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">
+        ${Object.values(MODELS).map(m => `<label style="font-size:11px;color:var(--text2);border:0.5px solid var(--border);border-radius:5px;padding:4px 7px;cursor:pointer"><input type="checkbox" ${getAiModels().includes(m.id)?'checked':''} onchange="EL.toggleAiModel('${m.id}', this.checked)"/> ${m.name}</label>`).join('')}
+      </div>
+    </div>
+
+    <div style="margin-top:16px;font-size:11px;color:var(--text3)">Quant settings take effect on the next rescan. The AI panel always chooses from exactly ${AI_FINALISTS} finalists. <button class="btn" style="font-size:11px;padding:3px 10px;margin-left:6px" onclick="EL.retry()">Rescan now</button></div>
   </div>` : ''}
 
   ${st.err ? `
@@ -763,6 +1063,9 @@ function render() {
   <div class="section-divider">Flagged — not shown as picks</div>
   ${st.picks.flagged.map(flagCard).join('')}
   ` : ''}
+
+  ${hasPicks ? aiPanel() : ''}
+  ${leaderboardPanel()}
 
   <div class="card" style="font-size:13px;line-height:1.8;margin-top:8px">
     <div class="lbl" style="margin-bottom:6px">Track record since ${START}</div>
@@ -813,6 +1116,27 @@ window.EL = {
   closeSettle()   { st.settleId = null; render(); },
   toggleHist()    { st.showHist = !st.showHist; render(); },
   toggleSettings(){ st.showSettings = !st.showSettings; render(); },
+  saveWorkerSecret(v) {
+    LS.set('embet_worker_secret', v.trim());
+  },
+  saveWorkerUrl(v) {
+    LS.set('embet_worker_url', String(v || '').trim());
+    st.workerUrl = getWorkerUrl();
+    render();
+  },
+  toggleAiModel(id, checked) {
+    const cur = new Set(getAiModels());
+    if (checked) cur.add(id); else cur.delete(id);
+    const next = [...cur].filter(x => MODELS[x]);
+    LS.set('embet_ai_models', next);
+    st.aiModels = next;
+    render();
+  },
+  runAiPanel() {
+    const finalists = finalistPoolFromPicks(st.picks);
+    if (!finalists.length) return;
+    runAllModels(finalists, st.picks);
+  },
   previewSetting(key, val) {
     // Keep state in sync while the slider is being dragged. The number label
     // updates on the next full render (fired by saveSetting on release).
@@ -877,6 +1201,7 @@ function captureClosing(g) {
     if (out && out.price != null) {
       p.closingLine = out.price;
       p.closingAt   = new Date().toISOString();
+      updateModelLeaderboardCLV(p.id, cCLV(p.line, p.closingLine));
     }
   }
 }
@@ -1174,6 +1499,11 @@ async function scan() {
     st.picks = picks;
     LS.set('embet_picks_' + today(), picks);
 
+    const aiFinalists = finalistPoolFromPicks(picks);
+    if (getWorkerUrl() && aiFinalists.length) {
+      await runAllModels(aiFinalists, picks);
+    }
+
   } catch (e) {
     st.err = e.message || 'Failed to fetch odds.';
   }
@@ -1195,6 +1525,9 @@ function init() {
 
   const settings = LS.get('embet_settings');
   if (settings) st.settings = settings;
+
+  st.workerUrl = getWorkerUrl();
+  st.aiModels = getAiModels();
 
   const savedKey = LS.get('embet_ak');
   if (savedKey) {
