@@ -530,6 +530,7 @@ async function runAllModels(candidates, basePicks) {
 
   st.aiLoading = true;
   st.aiStatuses = {};
+  st.aiErrors = {};
   activeIds.forEach(id => st.aiStatuses[id] = 'loading');
   render();
 
@@ -542,6 +543,7 @@ async function runAllModels(candidates, basePicks) {
       st.aiStatuses[id] = 'ok';
     } else {
       st.aiStatuses[id] = 'error';
+      st.aiErrors[id] = res.reason?.message || String(res.reason || 'Unknown error');
     }
   });
 
@@ -576,6 +578,14 @@ function aiPanel() {
     return bdg(cls, `${MODELS[id].name}${stt ? `: ${stt}` : ''}`);
   }).join(' ');
 
+  // Surface the actual failure reason instead of a bare "error" badge -- if every
+  // model fails with the identical message, it's almost always one shared cause
+  // (auth secret, worker URL, or the worker itself), not four separate problems.
+  const errorMsgs = [...new Set(Object.values(st.aiErrors || {}))];
+  const errorDetail = errorMsgs.length
+    ? `<div style="margin-top:6px;font-size:11px;color:var(--red);font-family:var(--mono)">${errorMsgs.map(esc).join('<br>')}</div>`
+    : '';
+
   const resultRows = vals.map(r => {
     const p = byId[r.topPickId];
     return `<div class="ai-pick-row" style="border-color:var(--accent-border)">
@@ -599,6 +609,7 @@ function aiPanel() {
       ${workerUrl ? `<button class="btn" style="font-size:11px;white-space:nowrap" onclick="EL.runAiPanel()">Run AI panel</button>` : `<button class="btn" style="font-size:11px;white-space:nowrap" onclick="EL.toggleSettings()">Add AI worker</button>`}
     </div>
     ${statusLine ? `<div style="margin-bottom:10px">${statusLine}</div>` : ''}
+    ${errorDetail}
     ${consensusPick ? `<div style="background:var(--accent-bg);border:0.5px solid var(--accent-border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:13px"><strong>Consensus:</strong> ${esc(consensusPick.bet)} &middot; ${esc(consensusPick.game)} <span class="mono" style="color:var(--green)">${fE(consensusPick.edge)}</span> <span style="color:var(--text2)">(${consensus.votes}/${consensus.total} model votes)</span></div>` : ''}
     ${resultRows || (st.aiLoading ? `<div class="ai-pick-row">AI panel running…</div>` : `<div style="font-size:12px;color:var(--text3);margin-bottom:8px">No AI results yet. Add your Cloudflare worker URL in Settings, then run the panel.</div>`)}
     <div style="margin-top:12px;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Current finalist pool</div>
