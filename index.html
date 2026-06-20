@@ -222,7 +222,7 @@ const topN    = () => st.settings?.topN    ?? DEFAULT_TOP_N;
 const AI_FINALISTS = 4; // Layer 2: the AI panel must choose from exactly the top four math-filtered finalists.
 const DEFAULT_AI_MODELS = ['claude','gpt4o','gemini','deepseek'];
 const MODELS = {
-  claude:   { id:'claude',   name:'Claude',   provider:'anthropic', model:'claude-3-5-sonnet-20240620', hasSearch:true  },
+  claude:   { id:'claude',   name:'Claude',   provider:'anthropic', model:'claude-sonnet-4-6',          hasSearch:true  },
   gpt4o:    { id:'gpt4o',    name:'GPT-4o',   provider:'openai',    model:'gpt-4o',                     hasSearch:false },
   gemini:   { id:'gemini',   name:'Gemini',   provider:'google',    model:'gemini-2.5-flash',           hasSearch:false },
   deepseek: { id:'deepseek', name:'DeepSeek', provider:'deepseek',  model:'deepseek-chat',              hasSearch:false }
