@@ -668,8 +668,11 @@ const esc   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 
 // Days until a game
 function daysUntil(iso) {
-  const diff = new Date(iso) - new Date();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  const now = new Date();
+  const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const gameDate = new Date(iso);
+  const gameDateOnly = new Date(gameDate.getFullYear(), gameDate.getMonth(), gameDate.getDate());
+  return Math.round((gameDateOnly - nowDate) / (1000 * 60 * 60 * 24));
 }
 
 // Storage
@@ -962,7 +965,7 @@ function render() {
     ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">emBET requires direct network access to the-odds-api.com. If you're inside Claude's viewer, download the file and open it in your browser—or host it on GitHub Pages for a permanent shareable link.</div>`
     : '';
 
-  const hasPicks = (st.picks?.near?.length || 0) > 0 || (st.picks?.future?.length || 0) > 0;
+  const hasPicks = (st.picks?.near?.length || 0) > 0 || (st.picks?.future?.length || 0) > 0 || (st.picks?.far?.length || 0) > 0;
   const refreshing = st.loading && !!st.picks; // background rescan in progress while old picks are still on screen
 
   app.innerHTML = `
@@ -1069,6 +1072,11 @@ function render() {
   ${(st.picks?.future?.length || 0) > 0
     ? st.picks.future.map(p => rCard(p, 'future')).join('')
     : hasPicks ? `<div class="empty-window">No plays beyond the next 3 days. emBET only sees games the books are currently pricing — typically about a week out, so this section is usually thin and often empty.</div>` : ''}
+
+  ${(st.picks?.far?.length || 0) > 0 ? `
+  <div class="section-divider">Early lines — posted beyond 2 weeks out</div>
+  ${st.picks.far.map(p => rCard(p, 'far')).join('')}
+  ` : ''}
 
   ${(st.picks?.flagged?.length || 0) > 0 ? `
   <div class="section-divider">Flagged — not shown as picks</div>
@@ -1488,7 +1496,11 @@ async function scan() {
     // what's actually on screen.
     const nearTruncated   = Math.max(0, nearOpps.length - near.length);
     const futureTruncated = Math.max(0, futureOpps.length - future.length);
-    const hiddenCount = farOpps.length
+    const far = farOpps
+      .slice(0, topN())
+      .map(o => mergePending({ ...o, horizon: 'far' }));
+    const farTruncated = Math.max(0, farOpps.length - far.length);
+    const hiddenCount = farTruncated
       + Math.max(0, flaggedAll.length - flagged.length)
       + nearTruncated
       + futureTruncated;
@@ -1498,13 +1510,15 @@ async function scan() {
       generatedAt: new Date().toISOString(),
       near,
       future,
+      far,
       flagged,
       total:        opps.length,
       sportsTried:  sorted.length,
       sportsFailed: failedSports,
       hidden:       hiddenCount,
       nearTruncated,
-      futureTruncated
+      futureTruncated,
+      farTruncated
     };
 
     st.picks = picks;
