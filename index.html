@@ -1054,8 +1054,7 @@ ${staleUnsettled.length > 0 ? `
     </div>`).join('')}
   </div>` : ''}
 
-  ${st.err ?
-  ${st.err ? `
+  ${st.err ?`
   <div style="background:var(--red-bg);color:var(--red);border:0.5px solid var(--red-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
     <div style="font-weight:500;margin-bottom:3px;font-size:13px">Could not fetch odds</div>
     <div style="font-size:13px">${esc(st.err)}</div>
