@@ -1549,7 +1549,20 @@ function init() {
   if (h) st.history = h;
 
   const pend = LS.get('embet_pending');
-  if (pend) st.pending = pend;
+if (pend) {
+  const now = Date.now();
+  const SIXTY_DAYS = 60 * 24 * 60 * 60 * 1000;
+  // Drop pending picks whose game is absurdly far in the future (60+ days) —
+  // the live feed never returns games that far out under current scan logic,
+  // so anything this far ahead is stale data from before the HFAR cap existed.
+  st.pending = pend.filter(p => {
+    const t = new Date(p.commenceTime).getTime();
+    return (t - now) <= SIXTY_DAYS;
+  });
+  if (st.pending.length !== pend.length) {
+    LS.set('embet_pending', st.pending); // persist the cleanup
+  }
+}
 
   const br = LS.get('embet_bankroll');
   if (br) st.bankroll = br;
