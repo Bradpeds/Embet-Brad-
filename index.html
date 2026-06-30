@@ -928,6 +928,14 @@ function render() {
   const clvSE  = (clvSd != null && clvValues.length > 1) ? clvSd / Math.sqrt(clvValues.length) : null;
 
   // History — pending (unsettled, possibly spanning many days) + settled
+  // Picks whose game ended 14+ days ago but still have no result recorded.
+  // These are almost certainly forgotten, not intentionally unsettled — flag
+  // them separately so they don't just blend into the rest of Pick history.
+  const STALE_UNSETTLED_MS = 14 * 24 * 60 * 60 * 1000;
+  const staleUnsettled = st.pending.filter(p => {
+    const gameOver = (Date.now() - new Date(p.commenceTime).getTime()) > STALE_UNSETTLED_MS;
+    return gameOver && !getRes(p.id);
+  });
   const allHist = [...st.pending, ...st.history]
     .sort((a,b) => {
       const aSettled = !!getRes(a.id), bSettled = !!getRes(b.id);
@@ -1036,7 +1044,17 @@ function render() {
 
     <div style="margin-top:16px;font-size:11px;color:var(--text3)">Quant settings take effect on the next rescan. The AI panel always chooses from exactly ${AI_FINALISTS} finalists. <button class="btn" style="font-size:11px;padding:3px 10px;margin-left:6px" onclick="EL.retry()">Rescan now</button></div>
   </div>` : ''}
+${staleUnsettled.length > 0 ? `
+  <div style="background:var(--amber-bg);color:var(--amber);border:0.5px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
+    <div style="font-weight:500;margin-bottom:6px;font-size:13px">${staleUnsettled.length} pick${staleUnsettled.length===1?'':'s'} need${staleUnsettled.length===1?'s':''} attention</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">These games ended 14+ days ago but were never settled — likely just forgotten. Settle them so they don't keep distorting your track record and CLV stats.</div>
+    ${staleUnsettled.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:0.5px solid var(--amber-border)">
+      <div style="font-size:12px"><strong>${esc(p.bet)}</strong> <span style="color:var(--text2)">&middot; ${esc(p.game)} &middot; ${fDate(p.commenceTime)}</span></div>
+      <button class="btn" style="font-size:11px;padding:3px 9px;white-space:nowrap" onclick="EL.openSettle('${p.id}')">Settle</button>
+    </div>`).join('')}
+  </div>` : ''}
 
+  ${st.err ?
   ${st.err ? `
   <div style="background:var(--red-bg);color:var(--red);border:0.5px solid var(--red-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
     <div style="font-weight:500;margin-bottom:3px;font-size:13px">Could not fetch odds</div>
