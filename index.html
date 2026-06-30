@@ -953,8 +953,10 @@ function render() {
       : `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="EL.openSettle('${p.id}')">Settle</button>`;
     const days = daysUntil(p.commenceTime);
     const horizon = p.horizon === 'future'
-      ? bdg('warning', 'future')
-      : bdg('info', 'near');
+  ? bdg('warning', 'future')
+  : p.horizon === 'far'
+    ? bdg('danger', 'far')
+    : bdg('info', 'near');
     const clv = p.closingLine != null ? cCLV(p.line, p.closingLine) : null;
     const clvTag = clv != null
       ? `<span class="mono" style="font-size:11px;font-weight:500;color:${clv>=0?'var(--green)':'var(--red)'}">${fCLV(clv)}</span>`
