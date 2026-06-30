@@ -929,7 +929,13 @@ function render() {
 
   // History — pending (unsettled, possibly spanning many days) + settled
   const allHist = [...st.pending, ...st.history]
-    .sort((a,b) => new Date(b.commenceTime) - new Date(a.commenceTime))
+    .sort((a,b) => {
+      const aSettled = !!getRes(a.id), bSettled = !!getRes(b.id);
+      const aPast = new Date(a.commenceTime) <= new Date(), bPast = new Date(b.commenceTime) <= new Date();
+      if (aPast && !aSettled && !(bPast && !bSettled)) return -1;
+      if (bPast && !bSettled && !(aPast && !aSettled)) return 1;
+      return new Date(b.commenceTime) - new Date(a.commenceTime);
+    })
     .slice(0, 14);
 
   const histRows = allHist.map(p => {
