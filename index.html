@@ -855,6 +855,159 @@ function calibrationCard() {
   </div>`;
 }
 
+
+// --- Odds-band calibration ---
+// Same question as edge calibration, different axis: does CLV hold up as the
+// line gets further from even money? Shin's de-vig is theoretically most
+// reliable near even-money prices; this checks whether that theory actually
+// shows up in tracked results before acting on it (e.g. restricting scans to
+// a -150/+150 band).
+const ODDS_BUCKETS = [
+  { lo: 0,   hi: 150, label: '\u00b1150 or tighter' },
+  { lo: 150, hi: 250, label: '150\u2013250' },
+  { lo: 250, hi: Infinity, label: '250+' }
+];
+function oddsCalibrationRows() {
+  const tracked = [...st.pending, ...st.history]
+    .filter(p => p.closingLine != null && typeof p.line === 'number');
+  return ODDS_BUCKETS.map(b => {
+    const inB = tracked.filter(p => {
+      const abs = Math.abs(p.line);
+      return abs >= b.lo && abs < b.hi;
+    });
+    const clvs = inB.map(p => cCLV(p.line, p.closingLine));
+    const avg  = clvs.length ? clvs.reduce((a,c)=>a+c,0) / clvs.length : null;
+    return { label: b.label, n: inB.length, avgClv: avg };
+  });
+}
+function oddsCalibrationCard() {
+  const rows = oddsCalibrationRows();
+  const totalN = rows.reduce((s,r)=>s+r.n,0);
+  const body = rows.map(r => `
+    <tr>
+      <td style="font-size:12px">${r.label}</td>
+      <td style="font-size:12px;color:var(--text2);text-align:center">${r.n || '\u2014'}</td>
+      <td style="text-align:right">${
+        r.avgClv != null
+          ? `<span class="mono" style="font-size:12px;font-weight:500;color:${r.avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(r.avgClv)}</span>`
+          : `<span style="font-size:12px;color:var(--text3)">\u2014</span>`
+      }</td>
+    </tr>`).join('');
+  return `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:14px 16px 10px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Odds-band calibration</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6">Average CLV by how far the line sits from even money. Shin's de-vig is theoretically most reliable near even lines \u2014 this checks whether that holds in your actual results. ${totalN < 20 ? `Only ${totalN} tracked so far.` : ''}</div>
+    </div>
+    <table class="tbl"><tbody>
+      <tr style="color:var(--text3)">
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase">Odds band</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:center">N</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:right">Avg CLV</td>
+      </tr>
+      ${body}
+    </tbody></table>
+  </div>`;
+}
+
+// --- Confidence calibration ---
+// The structural confidence score (quantConfidence) is weighted 40% into
+// pickRankScore alongside edge. This checks whether that weight is earned:
+// if High-confidence picks don't actually beat Low-confidence picks on
+// realized CLV, the score isn't pulling its weight and the blend should
+// change. Uses the same tier cutoffs as confidenceLabel() for consistency.
+function confidenceCalibrationRows() {
+  const tracked = [...st.pending, ...st.history]
+    .filter(p => p.closingLine != null && typeof p.confidence === 'number');
+  const tiers = [
+    { lo: 0.75, hi: 1.01, label: 'High' },
+    { lo: 0.5,  hi: 0.75, label: 'Moderate' },
+    { lo: 0.3,  hi: 0.5,  label: 'Low' },
+    { lo: 0,    hi: 0.3,  label: 'Very low' }
+  ];
+  return tiers.map(t => {
+    const inB = tracked.filter(p => p.confidence >= t.lo && p.confidence < t.hi);
+    const clvs = inB.map(p => cCLV(p.line, p.closingLine));
+    const avg  = clvs.length ? clvs.reduce((a,c)=>a+c,0) / clvs.length : null;
+    return { label: t.label, n: inB.length, avgClv: avg };
+  });
+}
+function confidenceCalibrationCard() {
+  const rows = confidenceCalibrationRows();
+  const totalN = rows.reduce((s,r)=>s+r.n,0);
+  const body = rows.map(r => `
+    <tr>
+      <td style="font-size:12px">${r.label}</td>
+      <td style="font-size:12px;color:var(--text2);text-align:center">${r.n || '\u2014'}</td>
+      <td style="text-align:right">${
+        r.avgClv != null
+          ? `<span class="mono" style="font-size:12px;font-weight:500;color:${r.avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(r.avgClv)}</span>`
+          : `<span style="font-size:12px;color:var(--text3)">\u2014</span>`
+      }</td>
+    </tr>`).join('');
+  return `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:14px 16px 10px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Confidence calibration</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6">Average CLV by structural confidence tier. If High beats Low, the confidence score is worth its 40% weight in pickRankScore. If it's flat, that weight should probably drop. ${totalN < 20 ? `Only ${totalN} tracked so far.` : ''}</div>
+    </div>
+    <table class="tbl"><tbody>
+      <tr style="color:var(--text3)">
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase">Tier</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:center">N</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:right">Avg CLV</td>
+      </tr>
+      ${body}
+    </tbody></table>
+  </div>`;
+}
+
+// --- Sport calibration ---
+// Pinnacle is deep and reliable in NBA/NFL/NHL/MLB/EPL (see PINNACLE_DEEP)
+// and thinner elsewhere. The confidence score already accounts for this
+// structurally, but this checks whether the thin-market sports are actually
+// dragging realized CLV down in practice, sport by sport.
+function sportCalibrationRows() {
+  const tracked = [...st.pending, ...st.history]
+    .filter(p => p.closingLine != null && p.sport);
+  const sports = [...new Set(tracked.map(p => p.sport))];
+  return sports.map(sport => {
+    const inB = tracked.filter(p => p.sport === sport);
+    const clvs = inB.map(p => cCLV(p.line, p.closingLine));
+    const avg  = clvs.length ? clvs.reduce((a,c)=>a+c,0) / clvs.length : null;
+    return { label: sport, n: inB.length, avgClv: avg };
+  }).sort((a,b) => b.n - a.n);
+}
+function sportCalibrationCard() {
+  const rows = sportCalibrationRows();
+  if (!rows.length) return '';
+  const totalN = rows.reduce((s,r)=>s+r.n,0);
+  const body = rows.map(r => `
+    <tr>
+      <td style="font-size:12px">${esc(r.label)}</td>
+      <td style="font-size:12px;color:var(--text2);text-align:center">${r.n || '\u2014'}</td>
+      <td style="text-align:right">${
+        r.avgClv != null
+          ? `<span class="mono" style="font-size:12px;font-weight:500;color:${r.avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(r.avgClv)}</span>`
+          : `<span style="font-size:12px;color:var(--text3)">\u2014</span>`
+      }</td>
+    </tr>`).join('');
+  return `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:14px 16px 10px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Sport calibration</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6">Average CLV by sport. Pinnacle is deepest in NBA/NFL/NHL/MLB/EPL \u2014 if the thinner-market sports are dragging the average down, that's evidence to weight or exclude them. ${totalN < 20 ? `Only ${totalN} tracked so far.` : ''}</div>
+    </div>
+    <table class="tbl"><tbody>
+      <tr style="color:var(--text3)">
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase">Sport</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:center">N</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:right">Avg CLV</td>
+      </tr>
+      ${body}
+    </tbody></table>
+  </div>`;
+}
 function render() {
   const app = document.getElementById('app');
   if (!app) return;
@@ -1124,6 +1277,9 @@ ${staleUnsettled.length > 0 ? `
   </div>
 
   ${clvSet.length > 0 ? calibrationCard() : ''}
+  ${clvSet.length > 0 ? oddsCalibrationCard() : ''}
+  ${clvSet.length > 0 ? confidenceCalibrationCard() : ''}
+  ${clvSet.length > 0 ? sportCalibrationCard() : ''}
 
   ${allHist.length > 0 ? `
   <div class="card" style="padding:0;overflow:hidden">
