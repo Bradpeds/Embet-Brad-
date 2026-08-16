@@ -201,25 +201,20 @@ const H72    = 72  * 60 * 60 * 1000;   // 3 days in ms
 const HFAR   = 14  * 24 * 60 * 60 * 1000; // upper bound on the "further out" window. The Odds API's default odds feed only returns games in roughly the next week regardless of this number — this is just a safety cap so a stray early-posted line way in the future doesn't show up looking like a confident edge. The real limit on how far ahead emBET sees is the feed, not this constant.
 const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours — cached picks older than this trigger an automatic background rescan on load instead of sitting stale for the rest of the day. Raise this (or remove the auto-rescan call in init()) if you're tight on the free-tier 500/month request quota — each scan costs ~9 requests.
 const MIN_CB = 3;   // min book quotes per side before trusting a consensus fair line
-// --- User-adjustable settings (defaults below; live values come from st.settings) ---
-const DEFAULT_MIN_EDGE   = 0.015; // min modeled edge before a play is surfaced. 1.5% is permissive — stale data, feed latency, and mid-day line movement can each be larger than that, so a low floor surfaces more marginal plays. Raising it (2–2.5%) demands a bigger modeled edge before a pick counts, trading volume for an attempt at higher average quality. There's no "correct" value; it's a risk/volume dial, which is why it's adjustable rather than baked in.
-const DEFAULT_TOP_N      = 3;     // how many of the best-EV plays to surface per time window (near / future), ranked by edge. More picks captures more of a day's total expected value but means more bets to track and more variance per day. Doesn't cost extra API calls — every opportunity is already fetched in one scan regardless of how many get shown.
-const MIN_EDGE_FLOOR = 0.005, MIN_EDGE_CEIL = 0.05; // guardrails on the adjustable edge threshold
-const TOP_N_FLOOR = 1, TOP_N_CEIL = 20;             // guardrails on picks-per-window
+const DEFAULT_MIN_EDGE   = 0.015;
+const DEFAULT_TOP_N      = 3;
+const MIN_EDGE_FLOOR = 0.005, MIN_EDGE_CEIL = 0.05;
+const TOP_N_FLOOR = 1, TOP_N_CEIL = 20;
 const SANITY_EDGE = 0.20;
-// Minimum CLV-evaluated picks a model needs before its leaderboard score is
-// shown. Below this, the sample is too small to mean anything — we show
-// "X/10 needed" instead of a misleadingly precise number.
-const MIN_SCORED = 10; // real sharp-vs-soft mispricings essentially never exceed ~20%. Anything above this is far more likely a data/matching issue (e.g. mismatched lines, a stale quote) than a genuine opportunity — those get pulled out of the main picks and flagged separately instead of being presented as something to bet.
-const KELLY_FRACTION = 0.25; // quarter-Kelly. Full Kelly assumes the edge estimate is exactly right -- with one sharp reference book and a de-vig model, it usually isn't exactly right, and full Kelly is brutal on bankroll when the edge is overestimated. A quarter (sometimes half) of full Kelly is the standard real-world haircut for that uncertainty.
-const SAMPLE_EARLY       = 30;  // below this, results are close to pure noise
-const SAMPLE_DEVELOPING  = 100; // below this, treat any trend as provisional
-const SAMPLE_MEANINGFUL  = 250; // the reviewer's own bar for an ROI conclusion to mean something
+const MIN_SCORED = 10;
+const KELLY_FRACTION = 0.25;
+const SAMPLE_EARLY       = 30;
+const SAMPLE_DEVELOPING  = 100;
+const SAMPLE_MEANINGFUL  = 250;
 const CLAMP = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-// Live setting accessors — read from state, fall back to defaults.
 const minEdge = () => st.settings?.minEdge ?? DEFAULT_MIN_EDGE;
 const topN    = () => st.settings?.topN    ?? DEFAULT_TOP_N;
-const AI_FINALISTS = 4; // Layer 2: the AI panel must choose from exactly the top four math-filtered finalists.
+const AI_FINALISTS = 4;
 const DEFAULT_AI_MODELS = ['claude','gpt4o','gemini','deepseek'];
 const MODELS = {
   claude:   { id:'claude',   name:'Claude',   provider:'anthropic', model:'claude-sonnet-4-6',          hasSearch:true  },
@@ -235,47 +230,25 @@ const PRI = [
   'basketball_ncaab','basketball_wnba',
   'soccer_usa_mls','soccer_epl'
 ];
-// Sports where Pinnacle is genuinely deep and well-established as the sharp
-// reference. This is NOT the same list as PRI above (which is just scan
-// order) -- Pinnacle carries far less volume in college sports, WNBA, and
-// MLS than in the major pro leagues, so "Pinnacle says X" is a weaker
-// claim there even though the app still uses it as the best available
-// reference. Picks referencing Pinnacle outside this set get an explicit
-// caveat rather than being presented with the same confidence as an NFL line.
 const PINNACLE_DEEP = new Set([
   'baseball_mlb','basketball_nba','icehockey_nhl','americanfootball_nfl','soccer_epl'
 ]);
-
-// Math
 const tD  = o => o > 0 ? o/100+1 : 100/Math.abs(o)+1;
 const iP  = o => 1/tD(o);
 const tA  = d => d >= 2 ? Math.round((d-1)*100) : Math.round(-100/(d-1));
 const cEV = (f,o) => f*(tD(o)-1)-(1-f);
-const cCLV = (yourLine, closeLine) => iP(closeLine) - iP(yourLine); // + = line moved your way after you bet
-
-// Suggested stake via fractional Kelly. This is informational only -- the
-// tracked P&L elsewhere still uses the flat $FLAT stake for consistency,
-// since switching live staking strategy mid-record is a real decision, not
-// something to do silently. b = net profit per $1 staked at this price.
+const cCLV = (yourLine, closeLine) => iP(closeLine) - iP(yourLine);
 function kellyStake(fairProb, americanOdds, bankroll) {
   if (!bankroll || bankroll <= 0) return null;
   const b = tD(americanOdds) - 1;
-  const fStar = fairProb - (1 - fairProb) / b; // = (b*p - q) / b
+  const fStar = fairProb - (1 - fairProb) / b;
   return bankroll * Math.max(0, fStar) * KELLY_FRACTION;
 }
-
-// Population stdev (n-1 denominator) -- used to put a rough confidence band
-// around average CLV so a positive number with a wide band reads as
-// "promising, not proven" rather than as a verdict.
 function stdev(arr, mean) {
   if (arr.length < 2) return null;
   const v = arr.reduce((s, x) => s + (x - mean) ** 2, 0) / (arr.length - 1);
   return Math.sqrt(v);
 }
-
-// How much weight a given sample size actually deserves. n here is the
-// count of CLV-tracked picks, not settled W/L -- CLV is the metric that
-// reflects skill fastest, so it's the right thing to gate confidence on.
 function sampleNote(n) {
   if (n === 0)                  return 'No closing lines captured yet — every number above is still zero signal.';
   if (n < SAMPLE_EARLY)         return `Only ${n} CLV-tracked pick${n===1?'':'s'} — this is still essentially noise. Don't read anything into it yet.`;
@@ -283,40 +256,22 @@ function sampleNote(n) {
   if (n < SAMPLE_MEANINGFUL)    return `${n} CLV-tracked picks — enough to start meaning something, though a real ROI conclusion wants ${SAMPLE_MEANINGFUL}+.`;
   return `${n} CLV-tracked picks — a real sample. Positive average CLV through this many bets is the strongest evidence this is finding actual edge, not luck.`;
 }
-
-// Shin's method de-vig for a two-outcome market (Shin 1992/1993).
-// Plain proportional de-vig (q_i / sum of q) spreads the vig evenly across
-// both sides as a share of probability, which understates favorites and
-// overstates longshots on skewed moneylines — the "favorite-longshot bias"
-// documented in the betting-market literature. Shin's model treats part of
-// the overround as a hedge against insider/sharp money and loads more of it
-// onto the longshot side instead. On near-even lines (most spreads/totals)
-// it converges to the same number as proportional de-vig; it only changes
-// the output meaningfully on lopsided moneylines, which is exactly where
-// the old method was weakest. z is solved numerically via bisection rather
-// than from a memorized closed-form constant, so there's no transcription
-// risk in the math.
 function shinProb(q1, q2) {
-  const Q = q1 + q2; // overround-inclusive sum, > 1 for any vigged market
+  const Q = q1 + q2;
   const pAt = (z, qi) => z >= 1
     ? (qi*qi) / Q
     : (Math.sqrt(z*z + 4*(1-z)*qi*qi/Q) - z) / (2*(1-z));
   const f = z => pAt(z, q1) + pAt(z, q2) - 1;
   let lo = 0, hi = 0.999999, flo = f(lo);
-  if (flo <= 0 || flo * f(hi) > 0) return [q1/Q, q2/Q]; // degenerate input — fall back to plain de-vig
+  if (flo <= 0 || flo * f(hi) > 0) return [q1/Q, q2/Q];
   for (let i = 0; i < 60; i++) {
     const mid = (lo + hi) / 2, fm = f(mid);
     if ((flo > 0) === (fm > 0)) { lo = mid; flo = fm; } else { hi = mid; }
   }
   const z  = (lo + hi) / 2;
   const p1 = pAt(z, q1), p2 = pAt(z, q2), t = p1 + p2;
-  return [p1/t, p2/t]; // renormalize for float safety
+  return [p1/t, p2/t];
 }
-
-// Robust consensus probability: median of implied probabilities, with
-// outlier quotes (>3x scaled-MAD from the median) trimmed before averaging.
-// Needs at least 3 quotes to attempt outlier detection; below that, MAD is
-// too noisy to trust, so it just averages what's there.
 function robustProb(prices) {
   if (!prices.length) return null;
   const probs = prices.map(iP).slice().sort((a,b) => a-b);
@@ -329,50 +284,18 @@ function robustProb(prices) {
   const kept = mad > 0 ? probs.filter(p => Math.abs(p-median) <= 3*mad) : probs;
   return kept.reduce((a,b)=>a+b,0) / kept.length;
 }
-
-// --- Quantitative confidence (Layer 3, computable half) ---
-// Per the architecture spec, confidence answers a DIFFERENT question from edge:
-// not "how big is the gap" but "how much should we trust that this gap is real
-// rather than a data artifact or a stale/thin quote." It is deliberately NOT
-// part of the edge math -- it never changes the edge number, it sits beside it.
-//
-// This is the *quantitative* axis only (Wil's term): everything here is computed
-// from data the scan already holds. The *contextual* axis (injuries, line
-// movement, weather) needs live web data and a backend, and is intentionally
-// absent rather than faked. The score below should be read as "how structurally
-// trustworthy is this price disagreement," not "how likely is this bet to win."
-//
-// Four bounded sub-scores in [0,1], then a weighted blend:
-//   depth      -- more books quoting this exact side = a more reliable consensus
-//   agreement  -- lower price dispersion across books = the market is settled here
-//   reference  -- Pinnacle present and deep > Pinnacle thin > soft-only consensus
-//   pinAlign   -- when Pinnacle exists, how closely the broader market agrees with it
-// Anything we can't yet measure (historical book-vs-book hit rate, line movement)
-// is simply not in the blend. No invented inputs.
 function quantConfidence(o) {
   const m = o.confMeta || {};
-  // depth: saturates around 8 books. 3 books (the minimum) is weak; 8+ is full.
   const depth = m.nBooks != null ? CLAMP((m.nBooks - 2) / 6, 0, 1) : 0.3;
-  // agreement: dispersion of implied prob across books. ~0 = perfect agreement,
-  // 0.04 (4 percentage points of stdev) or more = noisy. Inverted to a [0,1] score.
   const agreement = m.disp != null ? CLAMP(1 - (m.disp / 0.04), 0, 1) : 0.5;
-  // reference quality: sharp book beats consensus; deep sharp book beats thin.
   const reference = o.sharp ? (o.pinnacleDeep ? 1.0 : 0.7) : 0.5;
-  // pinAlign: only meaningful when Pinnacle exists. |consensus fair - pin implied|.
-  // If the broader market sits right on Pinnacle, alignment is high. Soft-only
-  // picks get a neutral 0.5 here since there's no sharp anchor to align to.
   let pinAlign = 0.5;
   if (m.pinProb != null && o.fairProb != null) {
     pinAlign = CLAMP(1 - (Math.abs(o.fairProb - m.pinProb) / 0.05), 0, 1);
   }
-  // Weighted blend. Reference quality and agreement matter most -- a sharp,
-  // settled line is the strongest structural signal; raw book count least.
   const score = 0.30*reference + 0.30*agreement + 0.25*pinAlign + 0.15*depth;
   return { score: CLAMP(score, 0, 1), depth, agreement, reference, pinAlign };
 }
-// Map a [0,1] confidence score to a label + the dominant reason, so the UI can
-// explain itself the way Update 5 asks ("selected because market agreement is
-// stronger..."). The reason names the highest and lowest contributing factors.
 function confidenceLabel(c) {
   const s = c.score;
   const tier = s >= 0.75 ? 'High' : s >= 0.5 ? 'Moderate' : s >= 0.3 ? 'Low' : 'Very low';
@@ -386,14 +309,11 @@ function confidenceLabel(c) {
   const strongest = ranked[0], weakest = ranked[ranked.length - 1];
   return { tier, strongest: strongest.v >= 0.6 ? strongest.good : null, weakest: weakest.v < 0.5 ? weakest.bad : null };
 }
-
-
 function pickRankScore(o) {
   const edgeNorm = CLAMP((o?.edge || 0) / SANITY_EDGE, 0, 1);
   const c = (o?.confidence != null) ? o.confidence : (o?.confMeta ? quantConfidence(o).score : 0.5);
   return 0.60 * edgeNorm + 0.40 * c;
 }
-
 function finalistPoolFromPicks(picks) {
   const pool = [...(picks?.near || []), ...(picks?.future || [])]
     .filter(p => p && !p.suspicious)
@@ -408,7 +328,6 @@ function finalistPoolFromPicks(picks) {
   }
   return out;
 }
-
 function buildPrompts(candidates, hasSearch) {
   const searchInstr = hasSearch
     ? 'You may use live search if your runtime supports it. Check only high-leverage context that could invalidate or strengthen a mathematically identified edge: injuries, lineups, weather, starting pitchers/goalies, schedule spots, and material line movement.'
@@ -450,7 +369,6 @@ Return ONLY valid JSON. No markdown, no code fences, no prose outside JSON.
 
   return { systemPrompt, userPrompt };
 }
-
 async function callModel(model, workerUrl, candidates) {
   if (!workerUrl || !candidates?.length) return null;
   const { systemPrompt, userPrompt } = buildPrompts(candidates, model.hasSearch);
@@ -475,7 +393,6 @@ async function callModel(model, workerUrl, candidates) {
     risk: result.risk || ''
   };
 }
-
 function aiConsensus(modelResults) {
   const vals = Object.values(modelResults || {}).filter(Boolean);
   if (!vals.length) return null;
@@ -484,20 +401,12 @@ function aiConsensus(modelResults) {
   const topId = Object.entries(counts).sort((a,b) => b[1] - a[1])[0]?.[0] || null;
   return { topPickId: topId, votes: counts[topId] || 0, total: vals.length };
 }
-
-// --- Model leaderboard ---
-// Tracks, per AI model, which finalist it chose each time the panel ran, then
-// fills in the actual CLV once that pick's closing line gets captured later
-// (via captureClosing). This is the honest version of "which model is best":
-// no model gets a Leading/Competitive/Lagging label until it has MIN_SCORED
-// real, settled-CLV picks behind it. Below that, the UI just shows the count
-// so far -- never an invented or premature score.
 function recordModelPicks(modelResults) {
   const perf = LS.get('embet_model_perf') || {};
   for (const [modelId, r] of Object.entries(modelResults || {})) {
     if (!r) continue;
     if (!perf[modelId]) perf[modelId] = { modelName: r.modelName, picks: [] };
-    if (perf[modelId].picks.some(p => p.pickId === r.topPickId)) continue; // already recorded
+    if (perf[modelId].picks.some(p => p.pickId === r.topPickId)) continue;
     perf[modelId].picks.push({
       pickId: r.topPickId,
       date: today(),
@@ -508,21 +417,19 @@ function recordModelPicks(modelResults) {
   }
   LS.set('embet_model_perf', perf);
 }
-
 function updateModelLeaderboardCLV(pickId, clvFraction) {
   const perf = LS.get('embet_model_perf') || {};
   let changed = false;
   for (const modelId in perf) {
     const rec = perf[modelId].picks.find(p => p.pickId === pickId);
     if (rec && !rec.clvLocked) {
-      rec.clv_pp = clvFraction * 100; // store as percentage points, matching fCLV's display unit
+      rec.clv_pp = clvFraction * 100;
       rec.clvLocked = true;
       changed = true;
     }
   }
   if (changed) LS.set('embet_model_perf', perf);
 }
-
 async function runAllModels(candidates, basePicks) {
   const workerUrl = getWorkerUrl();
   const activeIds = getAiModels().filter(id => MODELS[id]);
@@ -554,7 +461,6 @@ async function runAllModels(candidates, basePicks) {
   st.aiLoading = false;
   render();
 }
-
 function aiPanel() {
   const finalists = finalistPoolFromPicks(st.picks);
   const results = st.picks?.modelResults || {};
@@ -578,9 +484,6 @@ function aiPanel() {
     return bdg(cls, `${MODELS[id].name}${stt ? `: ${stt}` : ''}`);
   }).join(' ');
 
-  // Surface the actual failure reason instead of a bare "error" badge -- if every
-  // model fails with the identical message, it's almost always one shared cause
-  // (auth secret, worker URL, or the worker itself), not four separate problems.
   const errorMsgs = [...new Set(Object.values(st.aiErrors || {}))];
   const errorDetail = errorMsgs.length
     ? `<div style="margin-top:6px;font-size:11px;color:var(--red);font-family:var(--mono)">${errorMsgs.map(esc).join('<br>')}</div>`
@@ -616,11 +519,6 @@ function aiPanel() {
     ${finalistRows}
   </div>`;
 }
-
-
-// Model leaderboard -- only renders once at least one model has any
-// recorded picks. Each row stays unscored ("X/10 needed") until it has
-// MIN_SCORED real settled-CLV picks; nothing here is ever a guess.
 function leaderboardPanel() {
   const perf = LS.get('embet_model_perf') || {};
   const ids = Object.keys(perf).filter(id => perf[id]?.picks?.length);
@@ -654,10 +552,7 @@ function leaderboardPanel() {
     ${rows}
   </div>`;
 }
-
-// Format
 const fO    = o => o == null ? '—' : o > 0 ? `+${o}` : `${o}`;
-
 const fE    = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%`;
 const fCLV  = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
 const fDT   = iso => new Date(iso).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
@@ -665,8 +560,6 @@ const fDate = iso => new Date(iso).toLocaleDateString('en-US',{month:'short',day
 const today = () => new Date().toISOString().slice(0,10);
 const uid   = () => Math.random().toString(36).slice(2,8);
 const esc   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-// Days until a game
 function daysUntil(iso) {
   const now = new Date();
   const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -674,23 +567,16 @@ function daysUntil(iso) {
   const gameDateOnly = new Date(gameDate.getFullYear(), gameDate.getMonth(), gameDate.getDate());
   return Math.round((gameDateOnly - nowDate) / (1000 * 60 * 60 * 24));
 }
-
-// Storage
 const mem = {};
 const LS = {
   get(k)   { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return mem[k]||null; } },
   set(k,v) { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} mem[k]=v; }
 };
-
-// State
 const st = { loading:true, aiLoading:false, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false, bankroll:null, settings:{}, showSettings:false, aiStatuses:{}, workerUrl:'', aiModels:DEFAULT_AI_MODELS };
-
 function bdg(cls, text) {
   return `<span class="badge b-${cls||'neutral'}">${esc(String(text))}</span>`;
 }
 function getRes(id) { return st.history.find(h=>h.id===id)?.result||null; }
-
-// Pick card — type is 'near' or 'future'
 function rCard(p, type, isTop) {
   if (!p) return '';
   const isNear   = type === 'near';
@@ -698,19 +584,25 @@ function rCard(p, type, isTop) {
   const resBadge = res
     ? `<div style="margin-top:10px">${bdg(res==='W'?'success':res==='L'?'danger':'warning', res==='W'?'Win':res==='L'?'Loss':'Push')}</div>`
     : '';
-  const clv      = p.closingLine != null ? cCLV(p.line, p.closingLine) : null;
-  const clvLine  = clv != null
+  const finalClv   = p.closingLine != null ? cCLV(p.line, p.closingLine) : null;
+  const currentClv = (p.closingLine == null && p.latestLine != null) ? cCLV(p.line, p.latestLine) : null;
+  const clvLine = finalClv != null
     ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">
          Closing line: <span class="mono" style="color:var(--text)">${fO(p.closingLine)}</span>
          &ensp;&middot;&ensp;
-         <span class="mono" style="font-weight:500;color:${clv>=0?'var(--green)':'var(--red)'}">${fCLV(clv)} CLV</span>
+         <span class="mono" style="font-weight:500;color:${finalClv>=0?'var(--green)':'var(--red)'}">${fCLV(finalClv)} Final CLV</span>
        </div>`
-    : `<div style="margin-top:10px;font-size:11px;color:var(--text3)">Closing line not captured yet — open emBET again before this game starts to track it.</div>`;
+    : currentClv != null
+    ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">
+         Latest line: <span class="mono" style="color:var(--text)">${fO(p.latestLine)}</span>
+         &ensp;&middot;&ensp;
+         <span class="mono" style="font-weight:500;color:${currentClv>=0?'var(--green)':'var(--red)'}">${fCLV(currentClv)} Current CLV</span>
+         <span style="color:var(--text3)"> (pregame — not final)</span>
+       </div>`
+    : `<div style="margin-top:10px;font-size:11px;color:var(--text3)">No line movement captured yet — open emBET again before this game starts to track it.</div>`;
   const days     = daysUntil(p.commenceTime);
   const daysTxt  = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days} days away`;
   const kStake   = st.bankroll ? kellyStake(p.fairProb, p.line, st.bankroll) : null;
-  // Confidence is recomputed from the stored confMeta so it survives reloads
-  // and stays consistent with whatever the latest scoring logic is.
   const conf     = p.confMeta ? quantConfidence(p) : null;
   const confLbl  = conf ? confidenceLabel(conf) : null;
   const confColor = conf ? (conf.score >= 0.75 ? 'var(--green)' : conf.score >= 0.5 ? 'var(--amber)' : 'var(--text2)') : 'var(--text2)';
@@ -767,7 +659,6 @@ function rCard(p, type, isTop) {
     ${clvLine}
   </div>`;
 }
-
 function flagCard(o) {
   return `
   <div class="card" style="border-left:3px solid var(--red);font-size:13px">
@@ -779,15 +670,6 @@ function flagCard(o) {
     <div style="color:var(--text2);font-size:12px;margin-top:6px">Edge exceeds the ${(SANITY_EDGE*100).toFixed(0)}% sanity cap — real sharp-vs-soft mispricings essentially never get this large. Treat this as a possible data issue, not a play, until checked manually against the actual book.</div>
   </div>`;
 }
-
-// Calibration table — the core validation tool. Groups every pick that has
-// BOTH a modeled edge and a captured closing line into edge buckets, then
-// shows average CLV within each bucket. The question it answers: when the
-// model says "+3% edge," does that bet actually beat the close more than a
-// "+1.5% edge" bet does? If avg CLV rises with edge bucket, the edge
-// estimates are calibrated and mean something. If it's flat or random, the
-// edge number is decorative and the app is just line-shopping. This needs
-// real tracked history to say anything, so it fills in gradually.
 const EDGE_BUCKETS = [
   { lo: 0.015, hi: 0.025, label: '1.5–2.5%' },
   { lo: 0.025, hi: 0.05,  label: '2.5–5%'   },
@@ -804,12 +686,6 @@ function calibrationRows() {
     return { label: b.label, n: inB.length, avgClv: avg, lo: b.lo };
   });
 }
-// If a low-edge bucket has enough sample to judge and is running negative
-// while a higher bucket (also with enough sample) is running positive, that's
-// the calibration table actually doing its job: it's telling you the low end
-// of your edge estimates isn't predictive, and your threshold should move up
-// to where the signal starts. Both buckets need SAMPLE_EARLY+ to avoid acting
-// on noise -- this should get more confident as history accumulates, not less.
 function calibrationRecommendation(rows) {
   const usable = rows.filter(r => r.n >= SAMPLE_EARLY && r.avgClv != null);
   if (usable.length < 2) return null;
@@ -854,14 +730,6 @@ function calibrationCard() {
     </div>` : ''}
   </div>`;
 }
-
-
-// --- Odds-band calibration ---
-// Same question as edge calibration, different axis: does CLV hold up as the
-// line gets further from even money? Shin's de-vig is theoretically most
-// reliable near even-money prices; this checks whether that theory actually
-// shows up in tracked results before acting on it (e.g. restricting scans to
-// a -150/+150 band).
 const ODDS_BUCKETS = [
   { lo: 0,   hi: 150, label: '\u00b1150 or tighter' },
   { lo: 150, hi: 250, label: '150\u2013250' },
@@ -909,13 +777,6 @@ function oddsCalibrationCard() {
     </tbody></table>
   </div>`;
 }
-
-// --- Confidence calibration ---
-// The structural confidence score (quantConfidence) is weighted 40% into
-// pickRankScore alongside edge. This checks whether that weight is earned:
-// if High-confidence picks don't actually beat Low-confidence picks on
-// realized CLV, the score isn't pulling its weight and the blend should
-// change. Uses the same tier cutoffs as confidenceLabel() for consistency.
 function confidenceCalibrationRows() {
   const tracked = [...st.pending, ...st.history]
     .filter(p => p.closingLine != null && typeof p.confidence === 'number');
@@ -961,12 +822,6 @@ function confidenceCalibrationCard() {
     </tbody></table>
   </div>`;
 }
-
-// --- Sport calibration ---
-// Pinnacle is deep and reliable in NBA/NFL/NHL/MLB/EPL (see PINNACLE_DEEP)
-// and thinner elsewhere. The confidence score already accounts for this
-// structurally, but this checks whether the thin-market sports are actually
-// dragging realized CLV down in practice, sport by sport.
 function sportCalibrationRows() {
   const tracked = [...st.pending, ...st.history]
     .filter(p => p.closingLine != null && p.sport);
@@ -1012,7 +867,6 @@ function render() {
   const app = document.getElementById('app');
   if (!app) return;
 
-  // API key setup screen
   if (!st.keyReady) {
     app.innerHTML = `
     <div style="max-width:460px;margin:40px auto 0">
@@ -1037,7 +891,6 @@ function render() {
     return;
   }
 
-  // Settle modal
   if (st.settleId) {
     const p = [...(st.picks?.near||[]), ...(st.picks?.future||[]), ...st.pending, ...st.history].find(x => x && x.id === st.settleId);
     if (!p) { st.settleId = null; render(); return; }
@@ -1062,7 +915,6 @@ function render() {
     return;
   }
 
-  // Performance
   const settled = st.history.filter(p => p.result);
   const W   = settled.filter(p => p.result==='W').length;
   const L   = settled.filter(p => p.result==='L').length;
@@ -1080,10 +932,6 @@ function render() {
   const clvSd  = avgClv != null ? stdev(clvValues, avgClv) : null;
   const clvSE  = (clvSd != null && clvValues.length > 1) ? clvSd / Math.sqrt(clvValues.length) : null;
 
-  // History — pending (unsettled, possibly spanning many days) + settled
-  // Picks whose game ended 14+ days ago but still have no result recorded.
-  // These are almost certainly forgotten, not intentionally unsettled — flag
-  // them separately so they don't just blend into the rest of Pick history.
   const STALE_UNSETTLED_MS = 14 * 24 * 60 * 60 * 1000;
   const staleUnsettled = st.pending.filter(p => {
     const gameOver = (Date.now() - new Date(p.commenceTime).getTime()) > STALE_UNSETTLED_MS;
@@ -1135,7 +983,7 @@ function render() {
     : '';
 
   const hasPicks = (st.picks?.near?.length || 0) > 0 || (st.picks?.future?.length || 0) > 0 || (st.picks?.far?.length || 0) > 0;
-  const refreshing = st.loading && !!st.picks; // background rescan in progress while old picks are still on screen
+  const refreshing = st.loading && !!st.picks;
 
   app.innerHTML = `
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
@@ -1291,8 +1139,6 @@ ${staleUnsettled.length > 0 ? `
   </div>` : ''}
   `;
 }
-
-// Event handlers
 window.EL = {
   saveKey() {
     const v = (document.getElementById('key-inp') || {}).value || '';
@@ -1338,8 +1184,6 @@ window.EL = {
     runAllModels(finalists, st.picks);
   },
   previewSetting(key, val) {
-    // Keep state in sync while the slider is being dragged. The number label
-    // updates on the next full render (fired by saveSetting on release).
     st.settings = { ...st.settings, [key]: val };
   },
   saveSetting(key, val) {
@@ -1348,12 +1192,6 @@ window.EL = {
     render();
   },
   retry()         { st.err = ''; st.loading = true; render(); scan(); },
-  // One-tap fix for "13 found, only a few shown": raises picks-per-window
-  // by exactly enough to cover whatever got truncated on the last scan
-  // (not a guess -- nearTruncated/futureTruncated are the precise counts),
-  // then rescans immediately rather than making the person dig into
-  // Settings and rescan separately. Doesn't touch far-future or excess-
-  // flagged items, which aren't a topN problem and wouldn't be fixed by this.
   showMore() {
     const need = Math.max(st.picks?.nearTruncated || 0, st.picks?.futureTruncated || 0);
     if (need <= 0) return;
@@ -1364,7 +1202,7 @@ window.EL = {
   },
   setBankroll() {
     const input = window.prompt('Bankroll for stake-sizing suggestions ($) — used only to calculate the suggested stake shown on each pick, stored only in this browser:', st.bankroll || '');
-    if (input == null) return; // cancelled
+    if (input == null) return;
     const v = parseFloat(input);
     if (!isFinite(v) || v <= 0) return;
     st.bankroll = v;
@@ -1384,13 +1222,10 @@ window.EL = {
     render();
   }
 };
-
-// Update closing-line snapshots for any pending pick tied to this game.
-// The Odds API stops returning a game once it starts, so whatever price
-// we last captured before that becomes our best proxy for the closing line.
 const MKT_KEY = { ML: 'h2h', Spread: 'spreads', Total: 'totals' };
 function captureClosing(g) {
-  const matches = st.pending.filter(p => p.gameId === g.id);
+  const now = Date.now();
+  const matches = st.pending.filter(p => p.gameId === g.id && p.closingLine == null);
   for (const p of matches) {
     const bm  = g.bookmakers.find(b => (b.title || b.key) === p.book);
     const mkt = bm?.markets?.find(m => m.key === MKT_KEY[p.mkt]);
@@ -1398,48 +1233,66 @@ function captureClosing(g) {
       const pt = o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : '';
       return p.bet === `${o.name}${pt}`;
     });
-    if (out && out.price != null) {
-      p.closingLine = out.price;
-      p.closingAt   = new Date().toISOString();
+    if (!out || out.price == null) continue;
+    const gameStarted = new Date(p.commenceTime).getTime() <= now;
+    p.latestLine   = out.price;
+    p.latestLineAt = new Date().toISOString();
+    if (gameStarted) {
+      p.closingLine   = out.price;
+      p.closingAt     = new Date().toISOString();
+      p.lineFinalized = true;
       updateModelLeaderboardCLV(p.id, cCLV(p.line, p.closingLine));
     }
   }
 }
-
-// Add a freshly generated near/future pick to the persisted pending list,
-// unless that exact wager (same game, market, side, book) is already
-// being tracked — in which case keep the original so the opening line
-// we're measuring CLV against doesn't silently drift day to day.
+function finalizeStalePending() {
+  const now = Date.now();
+  let changed = false;
+  for (const p of st.pending) {
+    if (p.closingLine != null) continue;
+    if (new Date(p.commenceTime).getTime() > now) continue;
+    p.closingLine   = p.latestLine != null ? p.latestLine : p.line;
+    p.closingAt     = new Date().toISOString();
+    p.lineFinalized = true;
+    changed = true;
+    updateModelLeaderboardCLV(p.id, cCLV(p.line, p.closingLine));
+  }
+  if (changed) LS.set('embet_pending', st.pending);
+}
 function mergePending(pick) {
   if (!pick) return null;
   const idx = st.pending.findIndex(p =>
     p.gameId === pick.gameId && p.mkt === pick.mkt && p.bet === pick.bet && p.book === pick.book
   );
+  const freshPrice = pick.line;
   if (idx >= 0) {
     const existing = st.pending[idx];
-    // CLV tracking depends on the price that was actually open when this
-    // pick was first surfaced -- that and anything already captured must
-    // never be overwritten by a later rescan. Everything else (edge, fair
-    // value, sharp/Pinnacle-depth labels, etc.) is just display metadata,
-    // and should refresh to the latest computed values -- otherwise a pick
-    // tracked before some later fix (like a badge correction) stays frozen
-    // showing the old, wrong metadata forever.
+    const stillOpen = existing.closingLine == null;
     const merged = {
       ...pick,
-      id:          existing.id,
-      line:        existing.line,
-      closingLine: existing.closingLine,
-      closingAt:   existing.closingAt,
-      result:      existing.result
+      id:            existing.id,
+      line:          existing.line,
+      latestLine:    stillOpen ? freshPrice : existing.latestLine,
+      latestLineAt:  stillOpen ? new Date().toISOString() : existing.latestLineAt,
+      closingLine:   existing.closingLine,
+      closingAt:     existing.closingAt,
+      lineFinalized: existing.lineFinalized || false,
+      result:        existing.result
     };
     st.pending[idx] = merged;
     return merged;
   }
-  st.pending.push(pick);
-  return pick;
+  const fresh = {
+    ...pick,
+    latestLine:    freshPrice,
+    latestLineAt:  new Date().toISOString(),
+    closingLine:   null,
+    closingAt:     null,
+    lineFinalized: false
+  };
+  st.pending.push(fresh);
+  return fresh;
 }
-
-// Scan the Odds API
 async function scan() {
   try {
     const sRes = await fetch(`${OB}/sports/?apiKey=${AK}`);
@@ -1453,7 +1306,7 @@ async function scan() {
     ].slice(0, 8);
 
     const opps = [];
-    const failedSports = []; // sports whose odds request failed for a reason other than quota — tracked so a degraded scan never looks identical to a genuinely quiet board
+    const failedSports = [];
 
     for (const sport of sorted) {
       const url = new URL(`${OB}/sports/${sport}/odds/`);
@@ -1479,35 +1332,18 @@ async function scan() {
         if (new Date(g.commence_time) <= now) continue;
 
         const pin = g.bookmakers.find(b => b.key === 'pinnacle');
-
-        // Outcomes must match on BOTH side and point. "Team X" at -1.5 and
-        // "Team X" at -2.5 are different bets with different fair prices —
-        // keying only by name (the original bug) let the app apply one
-        // book's fair line to a completely different number at another
-        // book, producing nonsense "edges" like 70%+ on an MLB run line.
         const oKey = (name, point) => point != null ? `${name}|${point}` : name;
 
         for (const mkt of ['h2h', 'spreads', 'totals']) {
           const pm = pin?.markets?.find(m => m.key === mkt);
           let fm = null, sharpRef = false;
-          // Per-outcome confidence inputs gathered while building the fair map:
-          //   nBooks  -> how many books quoted this exact side+point (pool depth)
-          //   pinDist -> |consensus implied prob - Pinnacle implied prob| when both exist
-          //              (how far the broader market sits from the sharp book; small = aligned)
-          //   disp    -> stdev of implied probs across books for this outcome (market agreement;
-          //              low = books agree, the price is "settled"; high = noisy/unreliable)
-          // These are computed from data the scan already has and are NOT part of the
-          // edge math -- they live only in the confidence layer, per the spec.
-          const meta = {}; // oKey -> { nBooks, disp, pinProb }
+          const meta = {};
 
           if (pm?.outcomes?.length === 2) {
             const [a, b] = pm.outcomes;
             const [fa, fb] = shinProb(iP(a.price), iP(b.price));
             fm = { [oKey(a.name, a.point)]: fa, [oKey(b.name, b.point)]: fb };
             sharpRef = true;
-            // Pinnacle is the reference. Still gather how the soft books are
-            // dispersed around each side, and record Pinnacle's own implied
-            // prob so pinDist can be computed per book below.
             for (const key of [oKey(a.name, a.point), oKey(b.name, b.point)]) {
               const [nm, ptStr] = key.includes('|') ? key.split('|') : [key, null];
               const ptVal = ptStr != null ? parseFloat(ptStr) : null;
@@ -1523,13 +1359,7 @@ async function scan() {
               meta[key] = { nBooks: ips.length, disp, pinProb: key === oKey(a.name,a.point) ? iP(a.price) : iP(b.price) };
             }
           } else {
-            // No Pinnacle line — build a consensus, but only from books that
-            // are quoting the exact same point. Group every outcome seen
-            // across books by its point number, then use whichever point
-            // has the most total quotes (i.e. the number most books agree
-            // is "the" line) as the anchor. Alt lines at other numbers are
-            // ignored rather than blended in.
-            const pools = {}; // oKey -> { point, prices: [] }
+            const pools = {};
             for (const bm of g.bookmakers) {
               const m2 = bm.markets?.find(m => m.key === mkt);
               if (!m2?.outcomes || m2.outcomes.length !== 2) continue;
@@ -1547,7 +1377,7 @@ async function scan() {
             let bestKeys = null, bestCount = 0;
             for (const pk in byPoint) {
               const keys = byPoint[pk];
-              if (keys.length !== 2) continue; // need exactly two sides at this number to de-vig
+              if (keys.length !== 2) continue;
               const count = keys.reduce((s, k) => s + pools[k].prices.length, 0);
               if (count > bestCount) { bestCount = count; bestKeys = keys; }
             }
@@ -1559,9 +1389,6 @@ async function scan() {
                 if (pA != null && pB != null) {
                   const [sA, sB] = shinProb(pA, pB);
                   fm = { [k1]: sA, [k2]: sB };
-                  // Consensus-branch confidence inputs: pool depth and price
-                  // dispersion per side. No Pinnacle here, so pinProb stays null
-                  // (pinDist simply won't contribute to confidence on these).
                   for (const key of [k1, k2]) {
                     const ips = pools[key].prices.map(iP);
                     const mean = ips.reduce((s,x)=>s+x,0)/ips.length;
@@ -1582,7 +1409,7 @@ async function scan() {
 
             for (const o of m.outcomes) {
               const fair = fm[oKey(o.name, o.point)];
-              if (fair == null) continue; // this book's number doesn't match the line we have a fair price for — skip rather than guess
+              if (fair == null) continue;
               const edge = cEV(fair, o.price);
               if (edge <= minEdge()) continue;
 
@@ -1619,12 +1446,6 @@ async function scan() {
       }
     }
 
-    // Rank by a transparent blend of edge and confidence, per the architecture
-    // spec's core example: a +5 at high confidence should be able to outrank a
-    // +6 at low confidence. We scale edge into a roughly [0,1] band (capping at
-    // the 20% sanity edge) and blend 60/40 edge/confidence -- edge still leads,
-    // but confidence can reorder genuinely close calls and break ties. The
-    // displayed edge number is untouched; this only affects ordering/selection.
     const rankScore = o => {
       const edgeNorm = CLAMP(o.edge / SANITY_EDGE, 0, 1);
       const c = (o.confidence != null) ? o.confidence : 0.5;
@@ -1636,28 +1457,14 @@ async function scan() {
     const cut72h  = now + H72;
     const cutFar  = now + HFAR;
 
-    // Best EV plays within 72 hours (implausible edges excluded — see SANITY_EDGE)
     const nearOpps   = opps.filter(o => !o.suspicious && new Date(o.commenceTime).getTime() <= cut72h);
-    // Best plays beyond 72 hours, out to whatever the feed returns (the
-    // default odds endpoint only reaches ~a week ahead, so in practice this
-    // is "the rest of this week," not a long-range slate).
     const futureOpps = opps.filter(o => {
       if (o.suspicious) return false;
       const t = new Date(o.commenceTime).getTime();
       return t > cut72h && t <= cutFar;
     });
-    // Anything that cleared the edge floor but tripped the sanity cap — not
-    // selected as a pick, but worth seeing so a real bug (like the point-
-    // mismatch one) gets noticed quickly instead of silently disappearing.
     const flaggedAll = opps.filter(o => o.suspicious);
     const flagged = flaggedAll.slice(0, 3);
-    // Opportunities that cleared the edge floor but don't land in any
-    // visible bucket: non-suspicious plays further out than cutFar, or
-    // suspicious ones beyond the 3 shown in "flagged". Without tracking
-    // this, `total` can say "N plays found" while nothing is actually on
-    // screen -- exactly the contradiction that showed up when far-future
-    // games (e.g. NFL futures 80+ days out) cleared the floor but landed
-    // outside every window the UI actually renders.
     const farOpps = opps.filter(o => !o.suspicious && new Date(o.commenceTime).getTime() > cutFar);
 
     const near = nearOpps
@@ -1668,13 +1475,6 @@ async function scan() {
       .map(o => mergePending({ ...o, horizon: 'future' }));
     LS.set('embet_pending', st.pending);
 
-    // Total minus everything actually rendered anywhere (near, future,
-    // flagged) -- this needs to come AFTER the topN() slicing above, since
-    // qualifying near/future opportunities beyond the per-window pick count
-    // are silently dropped right there too. An earlier version of this only
-    // accounted for far-future and excess-flagged opportunities and missed
-    // this case, which is the same class of bug: a count that doesn't match
-    // what's actually on screen.
     const nearTruncated   = Math.max(0, nearOpps.length - near.length);
     const futureTruncated = Math.max(0, futureOpps.length - future.length);
     const far = farOpps
@@ -1705,6 +1505,8 @@ async function scan() {
     st.picks = picks;
     LS.set('embet_picks_' + today(), picks);
 
+    finalizeStalePending();
+
     const aiFinalists = finalistPoolFromPicks(picks);
     if (getWorkerUrl() && aiFinalists.length) {
       await runAllModels(aiFinalists, picks);
@@ -1717,8 +1519,38 @@ async function scan() {
   st.loading = false;
   render();
 }
-
-// Init
+function migrateSchemaV2() {
+  if (LS.get('embet_schema_v2')) return;
+  const now = Date.now();
+  const fix = arr => (arr || []).map(p => {
+    if (!p) return p;
+    if (p.latestLine == null) p.latestLine = p.line;
+    if (p.latestLineAt == null) p.latestLineAt = p.closingAt || null;
+    if (p.closingLine != null) {
+      const gameHasHappened = !isNaN(new Date(p.commenceTime).getTime()) && new Date(p.commenceTime).getTime() <= now;
+      const commence = new Date(p.commenceTime).getTime();
+      const closedAt = p.closingAt ? new Date(p.closingAt).getTime() : null;
+      const strictlyProvenFinal = closedAt != null && !isNaN(commence) && closedAt >= commence;
+      if (strictlyProvenFinal || gameHasHappened) {
+        p.lineFinalized = true;
+      } else {
+        p.latestLine    = p.closingLine;
+        p.latestLineAt  = p.closingAt || p.latestLineAt;
+        p.closingLine   = null;
+        p.closingAt     = null;
+        p.lineFinalized = false;
+      }
+    } else {
+      p.lineFinalized = false;
+    }
+    return p;
+  });
+  st.pending = fix(st.pending);
+  st.history = fix(st.history);
+  LS.set('embet_pending', st.pending);
+  LS.set('embet_history', st.history);
+  LS.set('embet_schema_v2', true);
+}
 function init() {
   const h = LS.get('embet_history');
   if (h) st.history = h;
@@ -1727,17 +1559,17 @@ function init() {
 if (pend) {
   const now = Date.now();
   const SIXTY_DAYS = 60 * 24 * 60 * 60 * 1000;
-  // Drop pending picks whose game is absurdly far in the future (60+ days) —
-  // the live feed never returns games that far out under current scan logic,
-  // so anything this far ahead is stale data from before the HFAR cap existed.
   st.pending = pend.filter(p => {
     const t = new Date(p.commenceTime).getTime();
     return (t - now) <= SIXTY_DAYS;
   });
   if (st.pending.length !== pend.length) {
-    LS.set('embet_pending', st.pending); // persist the cleanup
+    LS.set('embet_pending', st.pending);
   }
 }
+
+  migrateSchemaV2();
+  finalizeStalePending();
 
   const br = LS.get('embet_bankroll');
   if (br) st.bankroll = br;
@@ -1756,25 +1588,17 @@ if (pend) {
 
   if (!AK) {
     st.loading = false;
-    render(); // show key setup screen
+    render();
     return;
   }
 
   const cached = LS.get('embet_picks_' + today());
-  // Validate cache is new near/future format — old builds stored primary/alternate.
-  // Even within the near/future format, earlier versions stored near/future as a
-  // single object (or null) rather than an array — normalize that here so a
-  // cache left over from before this change doesn't break the new rendering.
   if (cached && 'near' in cached) {
     const toArr = v => Array.isArray(v) ? v : (v ? [v] : []);
     st.picks = { ...cached, near: toArr(cached.near), future: toArr(cached.future), flagged: cached.flagged || [] };
     st.loading = false;
     const age  = Date.now() - new Date(cached.generatedAt).getTime();
     if (age > STALE_MS) {
-      // Cache is stale (e.g. an earlier scan found nothing and that
-      // result would otherwise sit there unchanged all day). Show what
-      // we have immediately, then kick off a fresh scan in the background
-      // so the screen updates the moment new data lands.
       st.loading = true;
       render();
       scan();
@@ -1782,7 +1606,6 @@ if (pend) {
       render();
     }
   } else {
-    // Stale or wrong-format cache — discard and rescan
     render();
     scan();
   }
