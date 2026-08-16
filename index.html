@@ -943,9 +943,14 @@ function render() {
       const aPast = new Date(a.commenceTime) <= new Date(), bPast = new Date(b.commenceTime) <= new Date();
       if (aPast && !aSettled && !(bPast && !bSettled)) return -1;
       if (bPast && !bSettled && !(aPast && !aSettled)) return 1;
-      return new Date(b.commenceTime) - new Date(a.commenceTime);
+      // Sort by closeness to right now (soonest games -- today's, or just
+      // finished -- first), not by furthest-future calendar date. The old
+      // descending-date sort buried near-term picks (e.g. a same-day MLB
+      // game) behind far-future NFL/NHL futures picks that happen to have
+      // later commence dates but aren't more relevant to look at today.
+      return Math.abs(new Date(a.commenceTime) - Date.now()) - Math.abs(new Date(b.commenceTime) - Date.now());
     })
-    .slice(0, 14);
+    .slice(0, 20);
 
   const histRows = allHist.map(p => {
     const r   = getRes(p.id) || p.result;
