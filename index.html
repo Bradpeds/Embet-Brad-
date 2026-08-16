@@ -957,6 +957,14 @@ function render() {
   }
   const dupSettleGroups = Object.values(settleGroups).filter(g => g.length > 1);
 
+  // Backup reminder: only worth nagging about once there's actually
+  // something to lose (real history/pending entries), and only if it's
+  // been a while since the last export or one was never taken at all.
+  const lastBackupAt = LS.get('embet_last_backup');
+  const hasTrackedData = st.history.length > 0 || st.pending.length > 0;
+  const backupAgeDays = lastBackupAt ? (Date.now() - new Date(lastBackupAt).getTime()) / 86400000 : Infinity;
+  const needsBackupReminder = hasTrackedData && backupAgeDays > 7;
+
   const allHist = [...st.pending, ...st.history]
     .sort((a,b) => {
       const aSettled = !!getRes(a.id), bSettled = !!getRes(b.id);
@@ -1081,6 +1089,19 @@ function render() {
     </div>
 
     <div style="margin-top:16px;font-size:11px;color:var(--text3)">Quant settings take effect on the next rescan. The AI panel always chooses from exactly ${AI_FINALISTS} finalists. <button class="btn" style="font-size:11px;padding:3px 10px;margin-left:6px" onclick="EL.retry()">Rescan now</button></div>
+
+    <div style="margin-top:18px;padding-top:16px;border-top:0.5px solid var(--border)">
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px">Backup &amp; restore</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-bottom:10px">All tracked history, pending picks, and settings live only in this browser's storage — clearing site data, switching browsers, or an IT-managed device policy can erase them with no way to recover. Download a backup periodically and keep the file somewhere safe.${LS.get('embet_last_backup') ? ` Last backup: ${fDT(LS.get('embet_last_backup'))}.` : ' No backup has been taken yet.'}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn" style="font-size:12px" onclick="EL.exportBackup()">Download backup</button>
+        <label class="btn" style="font-size:12px;cursor:pointer">
+          Restore from backup
+          <input type="file" accept="application/json" style="display:none" onchange="EL.importBackup(this.files[0])" />
+        </label>
+      </div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:8px">The backup file does not include your Odds API key or AI worker secret — re-enter those after a restore if needed.</div>
+    </div>
   </div>` : ''}
 ${staleUnsettled.length > 0 ? `
   <div style="background:var(--amber-bg);color:var(--amber);border:0.5px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
@@ -1090,6 +1111,13 @@ ${staleUnsettled.length > 0 ? `
       <div style="font-size:12px"><strong>${esc(p.bet)}</strong> <span style="color:var(--text2)">&middot; ${esc(p.game)} &middot; ${fDate(p.commenceTime)}</span></div>
       <button class="btn" style="font-size:11px;padding:3px 9px;white-space:nowrap" onclick="EL.openSettle('${p.id}')">Settle</button>
     </div>`).join('')}
+  </div>` : ''}
+
+  ${needsBackupReminder ? `
+  <div style="background:var(--amber-bg);color:var(--amber);border:0.5px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
+    <div style="font-weight:500;margin-bottom:6px;font-size:13px">${lastBackupAt ? `Last backup was ${Math.floor(backupAgeDays)} days ago` : 'No backup has ever been taken'}</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">All your tracked history lives only in this browser's storage. Clearing site data, switching browsers, or a device policy can erase it permanently with no way to recover it.</div>
+    <button class="btn" style="font-size:12px" onclick="EL.exportBackup()">Download backup now</button>
   </div>` : ''}
 
   ${dupSettleGroups.length > 0 ? `
@@ -1188,6 +1216,71 @@ ${staleUnsettled.length > 0 ? `
   `;
 }
 window.EL = {
+  // Downloads all tracked app data (history, pending, settings, bankroll,
+  // AI config, model leaderboard) as a JSON file. Deliberately excludes
+  // embet_ak (Odds API key) and embet_worker_secret -- this file may end up
+  // in cloud storage, email, etc., and those are credentials, not tracked
+  // data. Re-enter keys after a restore if needed.
+  exportBackup() {
+    const backup = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      embet_history:     LS.get('embet_history')     || [],
+      embet_pending:      LS.get('embet_pending')      || [],
+      embet_settings:      LS.get('embet_settings')      || {},
+      embet_bankroll:       LS.get('embet_bankroll')       ?? null,
+      embet_ai_models:       LS.get('embet_ai_models')       || DEFAULT_AI_MODELS,
+      embet_worker_url:       LS.get('embet_worker_url')       || '',
+      embet_model_perf:        LS.get('embet_model_perf')        || {},
+      embet_schema_v2:           LS.get('embet_schema_v2')           || false
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `embet-backup-${today()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    LS.set('embet_last_backup', new Date().toISOString());
+    render();
+  },
+  // Restores from a previously exported backup file. Always confirms first
+  // since this fully replaces current data -- there is no undo once
+  // confirmed. Re-runs the schema migration flag as satisfied since an
+  // exported backup is already in the current line/latestLine/closingLine
+  // format by construction.
+  importBackup(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      let data;
+      try {
+        data = JSON.parse(e.target.result);
+      } catch (err) {
+        window.alert('Could not read this file — it doesn\'t look like valid JSON.');
+        return;
+      }
+      if (!data || typeof data !== 'object' || !('embet_history' in data || 'embet_pending' in data)) {
+        window.alert('This doesn\'t look like an emBET backup file.');
+        return;
+      }
+      const ok = window.confirm('This will REPLACE your current history, pending picks, and settings with the contents of this backup file. This cannot be undone. Continue?');
+      if (!ok) return;
+      if (data.embet_history)      LS.set('embet_history', data.embet_history);
+      if (data.embet_pending)      LS.set('embet_pending', data.embet_pending);
+      if (data.embet_settings)     LS.set('embet_settings', data.embet_settings);
+      if (data.embet_bankroll != null) LS.set('embet_bankroll', data.embet_bankroll);
+      if (data.embet_ai_models)    LS.set('embet_ai_models', data.embet_ai_models);
+      if (data.embet_worker_url)   LS.set('embet_worker_url', data.embet_worker_url);
+      if (data.embet_model_perf)   LS.set('embet_model_perf', data.embet_model_perf);
+      LS.set('embet_schema_v2', true);
+      window.alert('Backup restored. Reloading now.');
+      window.location.reload();
+    };
+    reader.readAsText(file);
+  },
   saveKey() {
     const v = (document.getElementById('key-inp') || {}).value || '';
     if (!v.trim()) return;
