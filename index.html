@@ -152,6 +152,7 @@
     .rbtn.W { background: var(--green-bg);  color: var(--green);  border-color: var(--green-border);  font-weight: 500; }
     .rbtn.L { background: var(--red-bg);    color: var(--red);    border-color: var(--red-border);    font-weight: 500; }
     .rbtn.P { background: var(--amber-bg);  color: var(--amber);  border-color: var(--amber-border);  font-weight: 500; }
+    .rbtn.N { background: var(--border);    color: var(--text);   border-color: var(--border-md);      font-weight: 500; }
     .tbl { width: 100%; border-collapse: collapse; }
     .tbl td { padding: 8px 14px; border-bottom: 0.5px solid var(--border); vertical-align: middle; }
     .ai-card {
@@ -905,7 +906,7 @@ function render() {
         <div style="font-size:13px;font-weight:500;margin-bottom:3px">${esc(p.bet)}</div>
         <div style="font-size:12px;color:var(--text2);margin-bottom:18px">${esc(p.game)}</div>
         <div style="display:flex;gap:8px">
-          ${['W','L','P'].map(r=>`<button class="rbtn${cur===r?' '+r:''}" onclick="EL.settle('${p.id}','${r}')">${r==='W'?'Win':r==='L'?'Loss':'Push'}</button>`).join('')}
+          ${['W','L','P','N'].map(r=>`<button class="rbtn${cur===r?' '+r:''}" onclick="EL.settle('${p.id}','${r}')">${r==='W'?'Win':r==='L'?'Loss':r==='N'?'No bet':'Push'}</button>`).join('')}
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:14px">
           <button class="btn" onclick="EL.closeSettle()">Cancel</button>
@@ -955,7 +956,7 @@ function render() {
   const histRows = allHist.map(p => {
     const r   = getRes(p.id) || p.result;
     const tag = r
-      ? bdg(r==='W'?'success':r==='L'?'danger':'warning', r==='W'?'Win':r==='L'?'Loss':'Push')
+      ? bdg(r==='W'?'success':r==='L'?'danger':r==='N'?'neutral':'warning', r==='W'?'Win':r==='L'?'Loss':r==='N'?'No bet':'Push')
       : `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="EL.openSettle('${p.id}')">Settle</button>`;
     const days = daysUntil(p.commenceTime);
     const horizon = p.horizon === 'future'
@@ -967,11 +968,21 @@ function render() {
     const clvTag = clv != null
       ? `<span class="mono" style="font-size:11px;font-weight:500;color:${clv>=0?'var(--green)':'var(--red)'}">${fCLV(clv)}</span>`
       : `<span style="font-size:11px;color:var(--text3)">—</span>`;
+    // Edge + confidence tier surfaced here so a pick that dropped off the
+    // live scan (line moved, got edged out of topN, etc.) can still be
+    // manually placed off this table with the same info it originally
+    // showed -- this is read-only display, doesn't affect any tracked data.
+    const edgeTag = typeof p.edge === 'number'
+      ? `<span class="mono" style="font-size:11px;color:var(--green)">${fE(p.edge)}</span>`
+      : '';
+    const confTier = p.confMeta ? confidenceLabel(quantConfidence(p)).tier : null;
+    const confTag = confTier ? bdg('neutral', confTier) : '';
     return `<tr>
       <td style="font-size:11px;color:var(--text2);white-space:nowrap">${fDate(p.commenceTime)}</td>
       <td>
         <div style="font-size:12px;font-weight:500">${esc(p.bet)}</div>
         <div style="font-size:11px;color:var(--text2)">${esc(p.game)}</div>
+        <div style="margin-top:2px">${edgeTag} ${confTag}</div>
       </td>
       <td style="white-space:nowrap">
         <span class="mono" style="font-size:12px">${fO(p.line)}</span>
@@ -1055,7 +1066,7 @@ function render() {
 ${staleUnsettled.length > 0 ? `
   <div style="background:var(--amber-bg);color:var(--amber);border:0.5px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
     <div style="font-weight:500;margin-bottom:6px;font-size:13px">${staleUnsettled.length} pick${staleUnsettled.length===1?'':'s'} need${staleUnsettled.length===1?'s':''} attention</div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">These games ended 14+ days ago but were never settled — likely just forgotten. Settle them so they don't keep distorting your track record and CLV stats.</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">These games ended 14+ days ago and haven't been settled yet. If you placed the bet, mark it Win/Loss/Push so your track record stays accurate. If you didn't bet it, mark it "No bet" — CLV tracking isn't affected either way, this is just for your W/L record.</div>
     ${staleUnsettled.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:0.5px solid var(--amber-border)">
       <div style="font-size:12px"><strong>${esc(p.bet)}</strong> <span style="color:var(--text2)">&middot; ${esc(p.game)} &middot; ${fDate(p.commenceTime)}</span></div>
       <button class="btn" style="font-size:11px;padding:3px 9px;white-space:nowrap" onclick="EL.openSettle('${p.id}')">Settle</button>
