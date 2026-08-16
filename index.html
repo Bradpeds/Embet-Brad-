@@ -189,7 +189,8 @@
   <div style="text-align:center;margin-top:44px;font-size:11px;color:var(--text3);line-height:1.8">
     emBET scans live lines across DraftKings, FanDuel, BetMGM, Caesars, and others daily.<br>
     The edge shown is the gap between a book's price and Pinnacle's, where Pinnacle is available — de-vigged with Shin's method (corrects for favorite-longshot bias) and filtered to a 1.5%+ gap. It's a measure of price disagreement against a sharp reference, not a prediction that the bet wins more often than it's priced to.<br>
-    Layer 1 finds disagreement between books; Layer 2 lets multiple AIs choose one of the top four math-filtered finalists. Average CLV over a large sample remains the real test of whether the full system is finding actual edge; any single result is noise.
+    Layer 1 finds disagreement between books; Layer 2 lets multiple AIs choose one of the top four math-filtered finalists. Average CLV over a large sample remains the real test of whether the full system is finding actual edge; any single result is noise.<br>
+    <span style="opacity:0.6">Build 2026-08-16-e — book-in-history + duplicate-settle detector</span>
   </div>
 </div>
 <script>
@@ -938,6 +939,24 @@ function render() {
     const gameOver = (Date.now() - new Date(p.commenceTime).getTime()) > STALE_UNSETTLED_MS;
     return gameOver && !getRes(p.id);
   });
+
+  // Duplicate-settle detector: emBET tracks the same wager (same game +
+  // market + side) separately per BOOK, since each book's price/edge is a
+  // distinct opportunity. A single real bet can only be placed at one book,
+  // so if multiple book-variants of the same wager all carry a real result
+  // (W/L/P), at most one of them reflects an actual bet -- the rest are
+  // almost certainly settle-by-mistake duplicates inflating the W/L/P&L
+  // record. This never auto-fixes anything (can't know which one is real
+  // without the person's memory) -- it just surfaces groups to review, with
+  // a one-tap "Mark No bet" per row using the existing settle('N') path.
+  const settleGroups = {};
+  for (const p of st.history) {
+    if (!['W','L','P'].includes(p.result)) continue;
+    const key = `${p.gameId}|${p.mkt}|${p.bet}`;
+    (settleGroups[key] ||= []).push(p);
+  }
+  const dupSettleGroups = Object.values(settleGroups).filter(g => g.length > 1);
+
   const allHist = [...st.pending, ...st.history]
     .sort((a,b) => {
       const aSettled = !!getRes(a.id), bSettled = !!getRes(b.id);
@@ -980,7 +999,7 @@ function render() {
     return `<tr>
       <td style="font-size:11px;color:var(--text2);white-space:nowrap">${fDate(p.commenceTime)}</td>
       <td>
-        <div style="font-size:12px;font-weight:500">${esc(p.bet)}</div>
+        <div style="font-size:12px;font-weight:500">${esc(p.bet)} <span style="color:var(--accent);font-weight:400">&middot; ${esc(p.book)}</span></div>
         <div style="font-size:11px;color:var(--text2)">${esc(p.game)}</div>
         <div style="margin-top:2px">${edgeTag} ${confTag}</div>
       </td>
@@ -1070,6 +1089,19 @@ ${staleUnsettled.length > 0 ? `
     ${staleUnsettled.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:0.5px solid var(--amber-border)">
       <div style="font-size:12px"><strong>${esc(p.bet)}</strong> <span style="color:var(--text2)">&middot; ${esc(p.game)} &middot; ${fDate(p.commenceTime)}</span></div>
       <button class="btn" style="font-size:11px;padding:3px 9px;white-space:nowrap" onclick="EL.openSettle('${p.id}')">Settle</button>
+    </div>`).join('')}
+  </div>` : ''}
+
+  ${dupSettleGroups.length > 0 ? `
+  <div style="background:var(--red-bg);color:var(--red);border:0.5px solid var(--red-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
+    <div style="font-weight:500;margin-bottom:6px;font-size:13px">${dupSettleGroups.length} bet${dupSettleGroups.length===1?'':'s'} settled at multiple books — review needed</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Each row below is the same wager tracked at a different book. You can only have placed the bet at one of them — leave the one you actually bet as Win/Loss/Push, and mark the rest "No bet" so your W/L record and P&amp;L aren't counting the same bet multiple times. This doesn't touch any CLV or calibration data — only the group below matches your actual W/L record.</div>
+    ${dupSettleGroups.map(g => `<div style="padding:8px 0;border-top:0.5px solid var(--red-border)">
+      <div style="font-size:12px;font-weight:500;margin-bottom:4px">${esc(g[0].bet)} <span style="color:var(--text2);font-weight:400">&middot; ${esc(g[0].game)}</span></div>
+      ${g.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:3px 0">
+        <div style="font-size:11px;color:var(--text2)">${esc(p.book)} ${fO(p.line)} &middot; marked ${p.result==='W'?'Win':p.result==='L'?'Loss':'Push'}</div>
+        <button class="btn" style="font-size:11px;padding:2px 8px;white-space:nowrap" onclick="EL.settle('${p.id}','N')">Mark No bet</button>
+      </div>`).join('')}
     </div>`).join('')}
   </div>` : ''}
 
