@@ -982,8 +982,12 @@ function render() {
 
   const histRows = allHist.map(p => {
     const r   = getRes(p.id) || p.result;
+    // Settled results stay tappable (not a static badge) so a mis-tap --
+    // like marking a win as a loss -- can be corrected later. Tapping
+    // reopens the same settle modal, which already highlights the current
+    // result and lets EL.settle() overwrite it with the right one.
     const tag = r
-      ? bdg(r==='W'?'success':r==='L'?'danger':r==='N'?'neutral':'warning', r==='W'?'Win':r==='L'?'Loss':r==='N'?'No bet':'Push')
+      ? `<span style="cursor:pointer" onclick="EL.openSettle('${p.id}')">${bdg(r==='W'?'success':r==='L'?'danger':r==='N'?'neutral':'warning', r==='W'?'Win':r==='L'?'Loss':r==='N'?'No bet':'Push')}</span>`
       : `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="EL.openSettle('${p.id}')">Settle</button>`;
     const days = daysUntil(p.commenceTime);
     const horizon = p.horizon === 'future'
@@ -1092,7 +1096,7 @@ function render() {
 
     <div style="margin-top:18px;padding-top:16px;border-top:0.5px solid var(--border)">
       <div style="font-size:13px;font-weight:500;margin-bottom:6px">Backup &amp; restore</div>
-      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-bottom:10px">All tracked history, pending picks, and settings live only in this browser's storage — clearing site data, switching browsers, or an IT-managed device policy can erase them with no way to recover. Download a backup periodically and keep the file somewhere safe.${LS.get('embet_last_backup') ? ` Last backup: ${fDT(LS.get('embet_last_backup'))}.` : ' No backup has been taken yet.'}</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-bottom:10px">All tracked history, pending picks, and settings live only in this browser's storage — clearing site data, switching browsers, or an IT-managed device policy can erase them with no way to recover. emBET tries to download a backup automatically every 7 days when you open it, but browsers can block automatic downloads silently — treat the button below as the reliable way to be sure.${LS.get('embet_last_backup') ? ` Last backup: ${fDT(LS.get('embet_last_backup'))}.` : ' No backup has been taken yet.'}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn" style="font-size:12px" onclick="EL.exportBackup()">Download backup</button>
         <label class="btn" style="font-size:12px;cursor:pointer">
@@ -1116,7 +1120,7 @@ ${staleUnsettled.length > 0 ? `
   ${needsBackupReminder ? `
   <div style="background:var(--amber-bg);color:var(--amber);border:0.5px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
     <div style="font-weight:500;margin-bottom:6px;font-size:13px">${lastBackupAt ? `Last backup was ${Math.floor(backupAgeDays)} days ago` : 'No backup has ever been taken'}</div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">All your tracked history lives only in this browser's storage. Clearing site data, switching browsers, or a device policy can erase it permanently with no way to recover it.</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">All your tracked history lives only in this browser's storage. Clearing site data, switching browsers, or a device policy can erase it permanently with no way to recover it. emBET just tried to download a fresh backup automatically — if you didn't see a download happen, your browser likely blocked it silently. Use the button below to be sure.</div>
     <button class="btn" style="font-size:12px" onclick="EL.exportBackup()">Download backup now</button>
   </div>` : ''}
 
@@ -1692,6 +1696,22 @@ function migrateSchemaV2() {
   LS.set('embet_history', st.history);
   LS.set('embet_schema_v2', true);
 }
+// Auto-backup: if it's been 7+ days since the last export (or one was never
+// taken) and there's real data worth protecting, attempt a download
+// automatically on load rather than waiting for the person to notice a
+// banner and click through manually. Browsers vary in whether they allow a
+// page-load-triggered download without a fresh user gesture -- if this gets
+// silently blocked, the amber reminder banner in render() is the guaranteed
+// fallback, so nothing is relying on this succeeding silently.
+function maybeAutoBackup() {
+  const lastBackupAt = LS.get('embet_last_backup');
+  const hasData = st.history.length > 0 || st.pending.length > 0;
+  const ageDays = lastBackupAt ? (Date.now() - new Date(lastBackupAt).getTime()) / 86400000 : Infinity;
+  if (hasData && ageDays >= 7) {
+    try { window.EL.exportBackup(); } catch (e) { /* banner reminder still covers this */ }
+  }
+}
+
 function init() {
   const h = LS.get('embet_history');
   if (h) st.history = h;
@@ -1711,6 +1731,7 @@ if (pend) {
 
   migrateSchemaV2();
   finalizeStalePending();
+  maybeAutoBackup();
 
   const br = LS.get('embet_bankroll');
   if (br) st.bankroll = br;
