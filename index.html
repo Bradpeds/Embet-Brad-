@@ -189,8 +189,7 @@
   <div style="text-align:center;margin-top:44px;font-size:11px;color:var(--text3);line-height:1.8">
     emBET scans live lines across DraftKings, FanDuel, BetMGM, Caesars, and others daily.<br>
     The edge shown is the gap between a book's price and Pinnacle's, where Pinnacle is available — de-vigged with Shin's method (corrects for favorite-longshot bias) and filtered to a 1.5%+ gap. It's a measure of price disagreement against a sharp reference, not a prediction that the bet wins more often than it's priced to.<br>
-    Layer 1 finds disagreement between books; Layer 2 lets multiple AIs choose one of the top four math-filtered finalists. Average CLV over a large sample remains the real test of whether the full system is finding actual edge; any single result is noise.<br>
-    <span style="opacity:0.6">Build 2026-08-16-e — book-in-history + duplicate-settle detector</span>
+    Layer 1 finds disagreement between books; Layer 2 lets multiple AIs choose one of the top four math-filtered finalists. Average CLV over a large sample remains the real test of whether the full system is finding actual edge; any single result is noise.
   </div>
 </div>
 <script>
@@ -199,14 +198,25 @@ const OB  = 'https://api.the-odds-api.com/v4';
 const BKS = 'pinnacle,draftkings,fanduel,betmgm,caesars,pointsbetus,betrivers,williamhill_us';
 const START  = 'June 17, 2026';
 const FLAT   = 10;
-const H72    = 72  * 60 * 60 * 1000;   // 3 days in ms
-const HFAR   = 14  * 24 * 60 * 60 * 1000; // upper bound on the "further out" window. The Odds API's default odds feed only returns games in roughly the next week regardless of this number — this is just a safety cap so a stray early-posted line way in the future doesn't show up looking like a confident edge. The real limit on how far ahead emBET sees is the feed, not this constant.
-const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours — cached picks older than this trigger an automatic background rescan on load instead of sitting stale for the rest of the day. Raise this (or remove the auto-rescan call in init()) if you're tight on the free-tier 500/month request quota — each scan costs ~9 requests.
-const MIN_CB = 3;   // min book quotes per side before trusting a consensus fair line
+const H72    = 72  * 60 * 60 * 1000;
+const HFAR   = 14  * 24 * 60 * 60 * 1000;
+const STALE_MS = 4 * 60 * 60 * 1000;
+const MIN_CB = 3;
 const DEFAULT_MIN_EDGE   = 0.015;
 const DEFAULT_TOP_N      = 3;
 const MIN_EDGE_FLOOR = 0.005, MIN_EDGE_CEIL = 0.05;
 const TOP_N_FLOOR = 1, TOP_N_CEIL = 20;
+// Optional personal risk cap: hides plays beyond a max |odds| the person
+// chooses. Off by default (null = unlimited) -- nothing changes for anyone
+// who doesn't touch this. Long-shot mispricings are the ones sportsbooks are
+// laziest about repricing, which cuts both ways: more likely to be stale
+// data, but also sometimes where genuine value hides. Rather than bake a
+// hard cutoff into the core edge/confidence math, this is a display filter
+// the person opts into -- the underlying scan still detects everything, and
+// the odds-band calibration table keeps collecting real evidence on the far
+// end regardless of whether it's currently hidden from view.
+const MAX_ODDS_FLOOR = 200, MAX_ODDS_CEIL = 3000;
+const maxOddsCap = () => st.settings?.maxOddsCap ?? null;
 const SANITY_EDGE = 0.20;
 const MIN_SCORED = 10;
 const KELLY_FRACTION = 0.25;
@@ -940,15 +950,6 @@ function render() {
     return gameOver && !getRes(p.id);
   });
 
-  // Duplicate-settle detector: emBET tracks the same wager (same game +
-  // market + side) separately per BOOK, since each book's price/edge is a
-  // distinct opportunity. A single real bet can only be placed at one book,
-  // so if multiple book-variants of the same wager all carry a real result
-  // (W/L/P), at most one of them reflects an actual bet -- the rest are
-  // almost certainly settle-by-mistake duplicates inflating the W/L/P&L
-  // record. This never auto-fixes anything (can't know which one is real
-  // without the person's memory) -- it just surfaces groups to review, with
-  // a one-tap "Mark No bet" per row using the existing settle('N') path.
   const settleGroups = {};
   for (const p of st.history) {
     if (!['W','L','P'].includes(p.result)) continue;
@@ -957,9 +958,6 @@ function render() {
   }
   const dupSettleGroups = Object.values(settleGroups).filter(g => g.length > 1);
 
-  // Backup reminder: only worth nagging about once there's actually
-  // something to lose (real history/pending entries), and only if it's
-  // been a while since the last export or one was never taken at all.
   const lastBackupAt = LS.get('embet_last_backup');
   const hasTrackedData = st.history.length > 0 || st.pending.length > 0;
   const backupAgeDays = lastBackupAt ? (Date.now() - new Date(lastBackupAt).getTime()) / 86400000 : Infinity;
@@ -971,23 +969,14 @@ function render() {
       const aPast = new Date(a.commenceTime) <= new Date(), bPast = new Date(b.commenceTime) <= new Date();
       if (aPast && !aSettled && !(bPast && !bSettled)) return -1;
       if (bPast && !bSettled && !(aPast && !aSettled)) return 1;
-      // Sort by closeness to right now (soonest games -- today's, or just
-      // finished -- first), not by furthest-future calendar date. The old
-      // descending-date sort buried near-term picks (e.g. a same-day MLB
-      // game) behind far-future NFL/NHL futures picks that happen to have
-      // later commence dates but aren't more relevant to look at today.
       return Math.abs(new Date(a.commenceTime) - Date.now()) - Math.abs(new Date(b.commenceTime) - Date.now());
     })
     .slice(0, 20);
 
   const histRows = allHist.map(p => {
     const r   = getRes(p.id) || p.result;
-    // Settled results stay tappable (not a static badge) so a mis-tap --
-    // like marking a win as a loss -- can be corrected later. Tapping
-    // reopens the same settle modal, which already highlights the current
-    // result and lets EL.settle() overwrite it with the right one.
     const tag = r
-      ? `<span style="cursor:pointer" onclick="EL.openSettle('${p.id}')">${bdg(r==='W'?'success':r==='L'?'danger':r==='N'?'neutral':'warning', r==='W'?'Win':r==='L'?'Loss':r==='N'?'No bet':'Push')}</span>`
+      ? `<button class="btn" style="padding:2px 8px;font-size:11px;border:none;background:none" onclick="EL.openSettle('${p.id}')">${bdg(r==='W'?'success':r==='L'?'danger':r==='N'?'neutral':'warning', r==='W'?'Win':r==='L'?'Loss':r==='N'?'No bet':'Push')}</button>`
       : `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="EL.openSettle('${p.id}')">Settle</button>`;
     const days = daysUntil(p.commenceTime);
     const horizon = p.horizon === 'future'
@@ -999,10 +988,6 @@ function render() {
     const clvTag = clv != null
       ? `<span class="mono" style="font-size:11px;font-weight:500;color:${clv>=0?'var(--green)':'var(--red)'}">${fCLV(clv)}</span>`
       : `<span style="font-size:11px;color:var(--text3)">—</span>`;
-    // Edge + confidence tier surfaced here so a pick that dropped off the
-    // live scan (line moved, got edged out of topN, etc.) can still be
-    // manually placed off this table with the same info it originally
-    // showed -- this is read-only display, doesn't affect any tracked data.
     const edgeTag = typeof p.edge === 'number'
       ? `<span class="mono" style="font-size:11px;color:var(--green)">${fE(p.edge)}</span>`
       : '';
@@ -1070,7 +1055,24 @@ function render() {
       <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">How big a modeled edge a play needs before it's surfaced. Lower = more plays, more marginal. Higher = fewer, higher-conviction. There's no provably correct value — it's a volume-vs-quality dial. Default 1.5%.</div>
     </div>
 
-    <div>
+    <div style="margin-bottom:18px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-size:13px;font-weight:500">Hide plays beyond a max price</span>
+        <label style="font-size:11px;color:var(--text2);display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" ${maxOddsCap()!=null?'checked':''} onchange="EL.toggleOddsCap(this.checked)"/> On
+        </label>
+      </div>
+      ${maxOddsCap()!=null ? `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:2px">
+        <span class="mono" style="font-size:13px;color:var(--accent)">+${maxOddsCap()}</span>
+      </div>
+      <input type="range" min="${MAX_ODDS_FLOOR}" max="${MAX_ODDS_CEIL}" step="50" value="${maxOddsCap()}"
+        style="width:100%" oninput="EL.previewSetting('maxOddsCap', parseInt(this.value,10))" onchange="EL.saveSetting('maxOddsCap', parseInt(this.value,10))"/>
+      ` : ''}
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">Off by default — every detected play is shown regardless of price. Turn on to hide long-shot plays beyond a price you choose (e.g. +1000). This only affects what's displayed as a recommended pick; the odds-band calibration table below keeps tracking real CLV data on the far end either way, so you can see whether long shots are actually worth including later.</div>
+    </div>
+
+    <div style="margin-bottom:18px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
         <span style="font-size:13px;font-weight:500">Picks per window</span>
         <span class="mono" style="font-size:13px;color:var(--accent)">${topN()}</span>
@@ -1107,17 +1109,8 @@ function render() {
       <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:8px">The backup file does not include your Odds API key or AI worker secret — re-enter those after a restore if needed.</div>
     </div>
   </div>` : ''}
-${staleUnsettled.length > 0 ? `
-  <div style="background:var(--amber-bg);color:var(--amber);border:0.5px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
-    <div style="font-weight:500;margin-bottom:6px;font-size:13px">${staleUnsettled.length} pick${staleUnsettled.length===1?'':'s'} need${staleUnsettled.length===1?'s':''} attention</div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">These games ended 14+ days ago and haven't been settled yet. If you placed the bet, mark it Win/Loss/Push so your track record stays accurate. If you didn't bet it, mark it "No bet" — CLV tracking isn't affected either way, this is just for your W/L record.</div>
-    ${staleUnsettled.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:0.5px solid var(--amber-border)">
-      <div style="font-size:12px"><strong>${esc(p.bet)}</strong> <span style="color:var(--text2)">&middot; ${esc(p.game)} &middot; ${fDate(p.commenceTime)}</span></div>
-      <button class="btn" style="font-size:11px;padding:3px 9px;white-space:nowrap" onclick="EL.openSettle('${p.id}')">Settle</button>
-    </div>`).join('')}
-  </div>` : ''}
 
-  ${needsBackupReminder ? `
+${needsBackupReminder ? `
   <div style="background:var(--amber-bg);color:var(--amber);border:0.5px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
     <div style="font-weight:500;margin-bottom:6px;font-size:13px">${lastBackupAt ? `Last backup was ${Math.floor(backupAgeDays)} days ago` : 'No backup has ever been taken'}</div>
     <div style="font-size:12px;color:var(--text2);margin-bottom:10px">All your tracked history lives only in this browser's storage. Clearing site data, switching browsers, or a device policy can erase it permanently with no way to recover it. emBET just tried to download a fresh backup automatically — if you didn't see a download happen, your browser likely blocked it silently. Use the button below to be sure.</div>
@@ -1134,6 +1127,16 @@ ${staleUnsettled.length > 0 ? `
         <div style="font-size:11px;color:var(--text2)">${esc(p.book)} ${fO(p.line)} &middot; marked ${p.result==='W'?'Win':p.result==='L'?'Loss':'Push'}</div>
         <button class="btn" style="font-size:11px;padding:2px 8px;white-space:nowrap" onclick="EL.settle('${p.id}','N')">Mark No bet</button>
       </div>`).join('')}
+    </div>`).join('')}
+  </div>` : ''}
+
+${staleUnsettled.length > 0 ? `
+  <div style="background:var(--amber-bg);color:var(--amber);border:0.5px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
+    <div style="font-weight:500;margin-bottom:6px;font-size:13px">${staleUnsettled.length} pick${staleUnsettled.length===1?'':'s'} need${staleUnsettled.length===1?'s':''} attention</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">These games ended 14+ days ago and haven't been settled yet. If you placed the bet, mark it Win/Loss/Push so your track record stays accurate. If you didn't bet it, mark it "No bet" — CLV tracking isn't affected either way, this is just for your W/L record.</div>
+    ${staleUnsettled.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:0.5px solid var(--amber-border)">
+      <div style="font-size:12px"><strong>${esc(p.bet)}</strong> <span style="color:var(--text2)">&middot; ${esc(p.game)} &middot; ${fDate(p.commenceTime)}</span></div>
+      <button class="btn" style="font-size:11px;padding:3px 9px;white-space:nowrap" onclick="EL.openSettle('${p.id}')">Settle</button>
     </div>`).join('')}
   </div>` : ''}
 
@@ -1220,71 +1223,6 @@ ${staleUnsettled.length > 0 ? `
   `;
 }
 window.EL = {
-  // Downloads all tracked app data (history, pending, settings, bankroll,
-  // AI config, model leaderboard) as a JSON file. Deliberately excludes
-  // embet_ak (Odds API key) and embet_worker_secret -- this file may end up
-  // in cloud storage, email, etc., and those are credentials, not tracked
-  // data. Re-enter keys after a restore if needed.
-  exportBackup() {
-    const backup = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      embet_history:     LS.get('embet_history')     || [],
-      embet_pending:      LS.get('embet_pending')      || [],
-      embet_settings:      LS.get('embet_settings')      || {},
-      embet_bankroll:       LS.get('embet_bankroll')       ?? null,
-      embet_ai_models:       LS.get('embet_ai_models')       || DEFAULT_AI_MODELS,
-      embet_worker_url:       LS.get('embet_worker_url')       || '',
-      embet_model_perf:        LS.get('embet_model_perf')        || {},
-      embet_schema_v2:           LS.get('embet_schema_v2')           || false
-    };
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url;
-    a.download = `embet-backup-${today()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    LS.set('embet_last_backup', new Date().toISOString());
-    render();
-  },
-  // Restores from a previously exported backup file. Always confirms first
-  // since this fully replaces current data -- there is no undo once
-  // confirmed. Re-runs the schema migration flag as satisfied since an
-  // exported backup is already in the current line/latestLine/closingLine
-  // format by construction.
-  importBackup(file) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      let data;
-      try {
-        data = JSON.parse(e.target.result);
-      } catch (err) {
-        window.alert('Could not read this file — it doesn\'t look like valid JSON.');
-        return;
-      }
-      if (!data || typeof data !== 'object' || !('embet_history' in data || 'embet_pending' in data)) {
-        window.alert('This doesn\'t look like an emBET backup file.');
-        return;
-      }
-      const ok = window.confirm('This will REPLACE your current history, pending picks, and settings with the contents of this backup file. This cannot be undone. Continue?');
-      if (!ok) return;
-      if (data.embet_history)      LS.set('embet_history', data.embet_history);
-      if (data.embet_pending)      LS.set('embet_pending', data.embet_pending);
-      if (data.embet_settings)     LS.set('embet_settings', data.embet_settings);
-      if (data.embet_bankroll != null) LS.set('embet_bankroll', data.embet_bankroll);
-      if (data.embet_ai_models)    LS.set('embet_ai_models', data.embet_ai_models);
-      if (data.embet_worker_url)   LS.set('embet_worker_url', data.embet_worker_url);
-      if (data.embet_model_perf)   LS.set('embet_model_perf', data.embet_model_perf);
-      LS.set('embet_schema_v2', true);
-      window.alert('Backup restored. Reloading now.');
-      window.location.reload();
-    };
-    reader.readAsText(file);
-  },
   saveKey() {
     const v = (document.getElementById('key-inp') || {}).value || '';
     if (!v.trim()) return;
@@ -1336,6 +1274,15 @@ window.EL = {
     LS.set('embet_settings', st.settings);
     render();
   },
+  toggleOddsCap(checked) {
+    // Turning it on picks a sensible starting point (+1000, the exact
+    // number the person flagged as too aggressive) rather than defaulting
+    // to the slider's floor or ceiling; turning it off clears back to
+    // unlimited (null) rather than leaving a stale number saved but unused.
+    st.settings = { ...st.settings, maxOddsCap: checked ? 1000 : null };
+    LS.set('embet_settings', st.settings);
+    render();
+  },
   retry()         { st.err = ''; st.loading = true; render(); scan(); },
   showMore() {
     const need = Math.max(st.picks?.nearTruncated || 0, st.picks?.futureTruncated || 0);
@@ -1365,6 +1312,61 @@ window.EL = {
     LS.set('embet_pending', st.pending);
     st.settleId = null;
     render();
+  },
+  exportBackup() {
+    const backup = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      embet_history:     LS.get('embet_history')     || [],
+      embet_pending:      LS.get('embet_pending')      || [],
+      embet_settings:      LS.get('embet_settings')      || {},
+      embet_bankroll:       LS.get('embet_bankroll')       ?? null,
+      embet_ai_models:       LS.get('embet_ai_models')       || DEFAULT_AI_MODELS,
+      embet_worker_url:       LS.get('embet_worker_url')       || '',
+      embet_model_perf:        LS.get('embet_model_perf')        || {},
+      embet_schema_v2:           LS.get('embet_schema_v2')           || false
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `embet-backup-${today()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    LS.set('embet_last_backup', new Date().toISOString());
+    render();
+  },
+  importBackup(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      let data;
+      try {
+        data = JSON.parse(e.target.result);
+      } catch (err) {
+        window.alert('Could not read this file — it doesn\'t look like valid JSON.');
+        return;
+      }
+      if (!data || typeof data !== 'object' || !('embet_history' in data || 'embet_pending' in data)) {
+        window.alert('This doesn\'t look like an emBET backup file.');
+        return;
+      }
+      const ok = window.confirm('This will REPLACE your current history, pending picks, and settings with the contents of this backup file. This cannot be undone. Continue?');
+      if (!ok) return;
+      if (data.embet_history)      LS.set('embet_history', data.embet_history);
+      if (data.embet_pending)      LS.set('embet_pending', data.embet_pending);
+      if (data.embet_settings)     LS.set('embet_settings', data.embet_settings);
+      if (data.embet_bankroll != null) LS.set('embet_bankroll', data.embet_bankroll);
+      if (data.embet_ai_models)    LS.set('embet_ai_models', data.embet_ai_models);
+      if (data.embet_worker_url)   LS.set('embet_worker_url', data.embet_worker_url);
+      if (data.embet_model_perf)   LS.set('embet_model_perf', data.embet_model_perf);
+      LS.set('embet_schema_v2', true);
+      window.alert('Backup restored. Reloading now.');
+      window.location.reload();
+    };
+    reader.readAsText(file);
   }
 };
 const MKT_KEY = { ML: 'h2h', Spread: 'spreads', Total: 'totals' };
@@ -1602,15 +1604,23 @@ async function scan() {
     const cut72h  = now + H72;
     const cutFar  = now + HFAR;
 
-    const nearOpps   = opps.filter(o => !o.suspicious && new Date(o.commenceTime).getTime() <= cut72h);
+    const passesOddsCap = o => {
+      const cap = maxOddsCap();
+      return cap == null || Math.abs(o.line) <= cap;
+    };
+    const nearOpps   = opps.filter(o => !o.suspicious && passesOddsCap(o) && new Date(o.commenceTime).getTime() <= cut72h);
     const futureOpps = opps.filter(o => {
-      if (o.suspicious) return false;
+      if (o.suspicious || !passesOddsCap(o)) return false;
       const t = new Date(o.commenceTime).getTime();
       return t > cut72h && t <= cutFar;
     });
     const flaggedAll = opps.filter(o => o.suspicious);
     const flagged = flaggedAll.slice(0, 3);
-    const farOpps = opps.filter(o => !o.suspicious && new Date(o.commenceTime).getTime() > cutFar);
+    const farOpps = opps.filter(o => !o.suspicious && passesOddsCap(o) && new Date(o.commenceTime).getTime() > cutFar);
+    // Plays that exist but are hidden purely by the odds cap -- tracked
+    // separately so the "N found, M shown" messaging can be honest about
+    // why, the same way it already is for topN truncation.
+    const oddsCappedCount = opps.filter(o => !o.suspicious && !passesOddsCap(o)).length;
 
     const near = nearOpps
       .slice(0, topN())
@@ -1629,7 +1639,8 @@ async function scan() {
     const hiddenCount = farTruncated
       + Math.max(0, flaggedAll.length - flagged.length)
       + nearTruncated
-      + futureTruncated;
+      + futureTruncated
+      + oddsCappedCount;
 
     const picks = {
       date:        today(),
@@ -1696,13 +1707,6 @@ function migrateSchemaV2() {
   LS.set('embet_history', st.history);
   LS.set('embet_schema_v2', true);
 }
-// Auto-backup: if it's been 7+ days since the last export (or one was never
-// taken) and there's real data worth protecting, attempt a download
-// automatically on load rather than waiting for the person to notice a
-// banner and click through manually. Browsers vary in whether they allow a
-// page-load-triggered download without a fresh user gesture -- if this gets
-// silently blocked, the amber reminder banner in render() is the guaranteed
-// fallback, so nothing is relying on this succeeding silently.
 function maybeAutoBackup() {
   const lastBackupAt = LS.get('embet_last_backup');
   const hasData = st.history.length > 0 || st.pending.length > 0;
@@ -1711,7 +1715,6 @@ function maybeAutoBackup() {
     try { window.EL.exportBackup(); } catch (e) { /* banner reminder still covers this */ }
   }
 }
-
 function init() {
   const h = LS.get('embet_history');
   if (h) st.history = h;
