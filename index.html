@@ -217,8 +217,23 @@ const TOP_N_FLOOR = 1, TOP_N_CEIL = 20;
 // end regardless of whether it's currently hidden from view.
 const MAX_ODDS_FLOOR = 200, MAX_ODDS_CEIL = 3000;
 const maxOddsCap = () => st.settings?.maxOddsCap ?? null;
-const SANITY_EDGE = 0.20;
+// PHASE 0 (2.4): `edge` is now a probability gap (percentage points), not an
+// EV fraction, so the sanity cap has to be restated in the new unit. The old
+// 0.20 meant "20% expected value", which at +300 was only a 5pp price
+// disagreement; as a probability gap, 0.20 would be so loose it would never
+// fire. A 10pp gap between a sharp reference and a soft book essentially never
+// occurs for real -- above that it is a data artifact, not a play.
+const SANITY_EDGE = 0.10;
 const MIN_SCORED = 10;
+// Cached scan blobs are keyed by schema version: pre-patch blobs hold `edge`
+// in EV units and would render as probability points if reused.
+const PICKS_KEY = () => 'embet_picks_v3_' + today();
+// Wait this long past kickoff before writing an unverifiable fallback close,
+// so captureClosing() gets real chances at the market first.
+const FINALIZE_GRACE_MS = 24 * 60 * 60 * 1000;
+// Rough paired-sample target before the Layer 1 vs Layer 2 difference means
+// anything. Instrumentation now; a readable answer is months away.
+const LAYER_TARGET_BATCHES = 150;
 const KELLY_FRACTION = 0.25;
 const SAMPLE_EARLY       = 30;
 const SAMPLE_DEVELOPING  = 100;
@@ -373,7 +388,10 @@ Return ONLY valid JSON. No markdown, no code fences, no prose outside JSON.
     offeredLine: c.line,
     referencePrice: c.fairOdds,
     fairProb: c.fairProb,
-    edge: c.edge,
+    // PHASE 0 (2.4): named explicitly by unit so the panel isn't reasoning
+    // about a number whose scale it has to guess. Architecture unchanged.
+    edgeProbabilityPoints: c.edgeProb != null ? +(c.edgeProb * 100).toFixed(2) : null,
+    expectedValuePct:      c.edgeEV   != null ? +(c.edgeEV   * 100).toFixed(2) : null,
     structuralConfidence: c.confidence ?? null,
     sharpReference: c.sharp ? (c.pinnacleDeep ? 'Pinnacle deep market' : 'Pinnacle thin market') : 'Consensus fallback',
     confidenceMeta: c.confMeta || null
@@ -437,6 +455,7 @@ function updateModelLeaderboardCLV(pickId, clvFraction) {
     if (rec && !rec.clvLocked) {
       rec.clv_pp = clvFraction * 100;
       rec.clvLocked = true;
+      rec.legacy = false;   // written only from a verified captured close
       changed = true;
     }
   }
@@ -466,10 +485,30 @@ async function runAllModels(candidates, basePicks) {
     }
   });
 
-  const next = { ...(basePicks || st.picks), aiFinalists: candidates.map(c => c.id), modelResults, aiConsensus: aiConsensus(modelResults), aiGeneratedAt: new Date().toISOString() };
+  // PHASE 0 (3.2): candidates[] arrives rank-ordered from
+  // finalistPoolFromPicks(), so candidates[0] is Layer 1's #1. Persisting it
+  // alongside the consensus is what makes the Layer 1 vs Layer 2 question
+  // answerable later; it costs nothing at scan time.
+  const consensus       = aiConsensus(modelResults);
+  const layer1TopId     = candidates[0]?.id || null;
+  const consensusId     = consensus?.topPickId || null;
+  const aiChangedChoice = !!(layer1TopId && consensusId && layer1TopId !== consensusId);
+
+  const next = { ...(basePicks || st.picks), aiFinalists: candidates.map(c => c.id), modelResults, aiConsensus: consensus, aiGeneratedAt: new Date().toISOString(), layer1TopId, consensusId, aiChangedChoice };
   st.picks = next;
   recordModelPicks(modelResults);
-  LS.set('embet_picks_' + today(), next);
+  if (layer1TopId && consensusId) {
+    recordLayerBatch({
+      batchKey:    `${today()}|${candidates.map(c => c.id).join(',')}`,
+      date:        today(),
+      generatedAt: next.aiGeneratedAt,
+      finalists:   candidates.map(c => c.id),
+      layer1TopId, consensusId, aiChangedChoice,
+      votes:       consensus?.votes ?? null,
+      total:       consensus?.total ?? null
+    });
+  }
+  LS.set(PICKS_KEY(), next);
   st.aiLoading = false;
   render();
 }
@@ -485,7 +524,7 @@ function aiPanel() {
   const finalistRows = finalists.map((p, i) => `<div class="ai-pick-row">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
       <div><span class="mono" style="color:var(--text3)">#${i+1}</span> <strong>${esc(p.bet)}</strong> <span style="color:var(--text2)">&middot; ${esc(p.game)}</span></div>
-      <span class="mono" style="color:var(--green);white-space:nowrap">${fE(p.edge)}</span>
+      <span class="mono" style="color:var(--green);white-space:nowrap">${fGap(p.edge)}</span>
     </div>
     <div style="color:var(--text3);margin-top:2px">${esc(p.book)} ${fO(p.line)} &middot; ${p.sharp ? (p.pinnacleDeep ? 'Pinnacle ref' : 'Pinnacle thin') : 'Consensus'} &middot; structural confidence ${(100*(p.confidence ?? 0)).toFixed(0)}%</div>
   </div>`).join('');
@@ -525,7 +564,7 @@ function aiPanel() {
     </div>
     ${statusLine ? `<div style="margin-bottom:10px">${statusLine}</div>` : ''}
     ${errorDetail}
-    ${consensusPick ? `<div style="background:var(--accent-bg);border:0.5px solid var(--accent-border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:13px"><strong>Consensus:</strong> ${esc(consensusPick.bet)} &middot; ${esc(consensusPick.game)} <span class="mono" style="color:var(--green)">${fE(consensusPick.edge)}</span> <span style="color:var(--text2)">(${consensus.votes}/${consensus.total} model votes)</span></div>` : ''}
+    ${consensusPick ? `<div style="background:var(--accent-bg);border:0.5px solid var(--accent-border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:13px"><strong>Consensus:</strong> ${esc(consensusPick.bet)} &middot; ${esc(consensusPick.game)} <span class="mono" style="color:var(--green)">${fGap(consensusPick.edge)}</span> <span style="color:var(--text2)">(${consensus.votes}/${consensus.total} model votes)</span></div>` : ''}
     ${resultRows || (st.aiLoading ? `<div class="ai-pick-row">AI panel running…</div>` : `<div style="font-size:12px;color:var(--text3);margin-bottom:8px">No AI results yet. Add your Cloudflare worker URL in Settings, then run the panel.</div>`)}
     <div style="margin-top:12px;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Current finalist pool</div>
     ${finalistRows}
@@ -538,7 +577,9 @@ function leaderboardPanel() {
 
   const rows = ids.map(id => {
     const data = perf[id];
-    const evaluated = data.picks.filter(p => p.clvLocked);
+    // PHASE 0 (2.1): pre-patch leaderboard entries were locked from fabricated
+    // closes and cannot be re-derived, so they are excluded rather than trusted.
+    const evaluated = data.picks.filter(p => p.clvLocked && !p.legacy);
     const hasEnough = evaluated.length >= MIN_SCORED;
     const avgCLV = evaluated.length ? evaluated.reduce((s,p) => s + p.clv_pp, 0) / evaluated.length : null;
     const statusTxt = !hasEnough ? `${evaluated.length}/${MIN_SCORED} needed`
@@ -566,6 +607,9 @@ function leaderboardPanel() {
 }
 const fO    = o => o == null ? '—' : o > 0 ? `+${o}` : `${o}`;
 const fE    = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%`;
+// PHASE 0 (2.4): edge is now expressed in probability points, the same unit as
+// CLV, so it needs its own formatter rather than borrowing the "%" one.
+const fGap  = v => v == null ? '—' : `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
 const fCLV  = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
 const fDT   = iso => new Date(iso).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
 const fDate = iso => new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
@@ -596,13 +640,23 @@ function rCard(p, type, isTop) {
   const resBadge = res
     ? `<div style="margin-top:10px">${bdg(res==='W'?'success':res==='L'?'danger':'warning', res==='W'?'Win':res==='L'?'Loss':'Push')}</div>`
     : '';
-  const finalClv   = p.closingLine != null ? cCLV(p.line, p.closingLine) : null;
+  // PHASE 0 (2.1): only a close actually observed from the market after kickoff
+  // is reported as a Final CLV. A fallback or pre-patch close is shown as
+  // unverified rather than presented as a real result.
+  const finalClv   = isCapturedClose(p) ? cCLV(p.line, p.closingLine) : null;
   const currentClv = (p.closingLine == null && p.latestLine != null) ? cCLV(p.line, p.latestLine) : null;
   const clvLine = finalClv != null
     ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">
          Closing line: <span class="mono" style="color:var(--text)">${fO(p.closingLine)}</span>
          &ensp;&middot;&ensp;
          <span class="mono" style="font-weight:500;color:${finalClv>=0?'var(--green)':'var(--red)'}">${fCLV(finalClv)} Final CLV</span>
+       </div>`
+    : p.closingLine != null
+    ? `<div style="margin-top:10px;font-size:11px;color:var(--text3)">
+         Closing line not verified — ${p.closeSource === 'legacy'
+           ? 'recorded before emBET tracked where a closing price came from'
+           : 'the market was never re-checked after kickoff, so this is the last price seen, not the close'}.
+         Excluded from CLV and calibration.
        </div>`
     : currentClv != null
     ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">
@@ -635,7 +689,7 @@ function rCard(p, type, isTop) {
         <div style="font-size:11px;color:var(--text3);margin-top:3px">${fDT(p.commenceTime)}</div>
       </div>
       <div style="text-align:right;flex-shrink:0">
-        <div class="mono" style="font-size:30px;font-weight:500;color:var(--green);line-height:1">${fE(p.edge)}</div>
+        <div class="mono" style="font-size:30px;font-weight:500;color:var(--green);line-height:1">${fGap(p.edge)}</div>
         <div class="lbl" style="margin-top:3px;margin-bottom:0">edge</div>
         ${conf ? `<div style="margin-top:8px"><span class="mono" style="font-size:15px;font-weight:500;color:${confColor}">${confLbl.tier}</span><div class="lbl" style="margin-top:1px;margin-bottom:0">confidence</div></div>` : ''}
       </div>
@@ -676,21 +730,150 @@ function flagCard(o) {
   <div class="card" style="border-left:3px solid var(--red);font-size:13px">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">
       <div style="font-weight:500">${esc(o.bet)} <span style="color:var(--text2);font-weight:400">&middot; ${esc(o.book)}</span></div>
-      <span class="mono" style="color:var(--red);font-weight:500;white-space:nowrap">${fE(o.edge)}</span>
+      <span class="mono" style="color:var(--red);font-weight:500;white-space:nowrap">${fGap(o.edge)}</span>
     </div>
     <div style="color:var(--text2);font-size:12px">${esc(o.game)} &middot; ${esc(o.sport)} &middot; ${esc(o.mkt)}</div>
-    <div style="color:var(--text2);font-size:12px;margin-top:6px">Edge exceeds the ${(SANITY_EDGE*100).toFixed(0)}% sanity cap — real sharp-vs-soft mispricings essentially never get this large. Treat this as a possible data issue, not a play, until checked manually against the actual book.</div>
+    <div style="color:var(--text2);font-size:12px;margin-top:6px">Price gap exceeds the ${(SANITY_EDGE*100).toFixed(0)}pp sanity cap — real sharp-vs-soft mispricings essentially never get this large. Treat this as a possible data issue, not a play, until checked manually against the actual book.</div>
   </div>`;
 }
+// ---------------------------------------------------------------------------
+// PHASE 0 (2.1 / 2.3) -- admissible CLV observations
+//
+// Every CLV statistic previously read:
+//     [...st.pending, ...st.history].filter(p => p.closingLine != null)
+// which admitted two classes of bad row:
+//
+//   (a) Fabricated closes. finalizeStalePending() assigned
+//       closingLine = latestLine ?? line, and for any pick where the app was
+//       not reopened between detection and kickoff, latestLine still equalled
+//       the entry line -- so cCLV(line, line) === 0. Those synthetic zeroes
+//       entered the headline average, the 95% CI, all four calibration tables
+//       and the model leaderboard, shrinking every result toward zero while
+//       inflating N.
+//
+//   (b) Duplicates. The scan emits one row per (game x market x outcome x
+//       book), so the same wager offered at DraftKings and FanDuel produced
+//       two near-perfectly correlated observations. clvSE = sd/sqrt(n) assumes
+//       independence, so duplicates made the interval too narrow.
+//
+// Only closes actually observed from the market after kickoff are admissible,
+// and each underlying wager contributes exactly one row.
+// ---------------------------------------------------------------------------
+function isCapturedClose(p) {
+  return !!p && p.closingLine != null && p.closeSource === 'captured';
+}
+function clvKey(p) {
+  return `${p.gameId || p.game || '?'}|${p.mkt || '?'}|${p.bet || '?'}`;
+}
+function clvObservations() {
+  const byKey = new Map();
+  for (const p of [...st.pending, ...st.history]) {
+    if (!isCapturedClose(p) || typeof p.line !== 'number') continue;
+    const k = clvKey(p);
+    const prev = byKey.get(k);
+    // Collapse duplicates to the most favorable price actually obtainable.
+    if (!prev || iP(p.line) < iP(prev.line)) byKey.set(k, p);
+  }
+  return [...byKey.values()];
+}
+function clvExcludedCounts() {
+  let legacy = 0, fallback = 0, duplicates = 0;
+  const seen = new Set();
+  for (const p of [...st.pending, ...st.history]) {
+    if (!p || p.closingLine == null) continue;
+    if (p.closeSource === 'legacy')   { legacy++;   continue; }
+    if (p.closeSource === 'fallback') { fallback++; continue; }
+    if (p.closeSource === 'captured') {
+      const k = clvKey(p);
+      if (seen.has(k)) duplicates++; else seen.add(k);
+    }
+  }
+  return { legacy, fallback, duplicates, total: legacy + fallback + duplicates };
+}
+
+// ---------------------------------------------------------------------------
+// PHASE 0 (3.2) -- Layer 1 vs Layer 2 instrumentation
+//
+// The model leaderboard tracked each AI's CLV but never recorded what Layer 1
+// alone would have chosen, so the decisive question -- does the AI panel
+// improve CLV over the math? -- was unanswerable. candidates[] is already
+// rank-ordered, so candidates[0] IS Layer 1's #1; it only had to be persisted
+// as a comparator.
+// ---------------------------------------------------------------------------
+function capturedById() {
+  const m = new Map();
+  for (const p of [...st.pending, ...st.history]) if (isCapturedClose(p)) m.set(p.id, p);
+  return m;
+}
+function layerBatches() { return LS.get('embet_layer_batches') || []; }
+function recordLayerBatch(batch) {
+  const log = layerBatches();
+  if (log.some(b => b.batchKey === batch.batchKey)) return;
+  log.push(batch);
+  LS.set('embet_layer_batches', log.slice(-500));
+}
+function layerComparison() {
+  const byId = capturedById();
+  const pairs = [];
+  for (const b of layerBatches()) {
+    const a = byId.get(b.layer1TopId), c = byId.get(b.consensusId);
+    if (!a || !c) continue;
+    pairs.push({ l1: cCLV(a.line, a.closingLine), l2: cCLV(c.line, c.closingLine), changed: !!b.aiChangedChoice });
+  }
+  if (!pairs.length) return null;
+  const mean  = xs => xs.reduce((s,x) => s+x, 0) / xs.length;
+  const diffs = pairs.map(p => p.l2 - p.l1);
+  const md    = mean(diffs);
+  const sd    = stdev(diffs, md);
+  const se    = (sd != null && diffs.length > 1) ? sd / Math.sqrt(diffs.length) : null;
+  const chg   = pairs.filter(p => p.changed);
+  return {
+    n: pairs.length,
+    l1: mean(pairs.map(p => p.l1)),
+    l2: mean(pairs.map(p => p.l2)),
+    diff: md,
+    ci95: se != null ? se * 1.96 : null,
+    nChanged: chg.length,
+    diffChanged: chg.length ? mean(chg.map(p => p.l2 - p.l1)) : null
+  };
+}
+function layerComparisonPanel() {
+  const c = layerComparison();
+  if (!c) return '';
+  const row = (label, v) => `<tr>
+    <td style="font-size:12px">${label}</td>
+    <td style="text-align:right"><span class="mono" style="font-size:12px;font-weight:500;color:${v>=0?'var(--green)':'var(--red)'}">${fCLV(v)}</span></td>
+  </tr>`;
+  return `<div class="section-divider">Layer 1 vs Layer 2</div>
+  <div class="ai-card">
+    <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:10px">
+      Does the AI panel beat the math alone? Counts only batches where both the Layer 1 top-ranked finalist and the AI consensus pick have a verified closing line. If the difference never turns positive, Layer 2 belongs in the interface as context, not as the thing that picks.
+    </div>
+    <table class="tbl"><tbody>
+      ${row('Layer 1 #1', c.l1)}
+      ${row('AI consensus', c.l2)}
+      ${row('Paired difference', c.diff)}
+    </tbody></table>
+    <div style="padding:10px 0 0;font-size:11px;color:var(--text3);line-height:1.6">
+      ${c.n} paired batch${c.n===1?'':'es'}${c.ci95!=null?` &middot; difference 95% CI ±${(c.ci95*100).toFixed(1)}pp`:''}.
+      ${c.nChanged>0
+        ? `The AI changed the pick in ${c.nChanged} of them; on those alone the difference is ${fCLV(c.diffChanged)}.`
+        : `The AI has not yet disagreed with Layer 1 on any settled batch, so the two columns are still measuring the same picks.`}
+      ${c.n < LAYER_TARGET_BATCHES ? ` Roughly ${LAYER_TARGET_BATCHES} paired batches are needed before a difference this size separates from noise — this is instrumentation, not a result.` : ''}
+    </div>
+  </div>`;
+}
+
+// PHASE 0 (2.4): buckets are probability points now, not EV percent. The
+// numeric boundaries are unchanged; only the unit and label differ.
 const EDGE_BUCKETS = [
-  { lo: 0.015, hi: 0.025, label: '1.5–2.5%' },
-  { lo: 0.025, hi: 0.05,  label: '2.5–5%'   },
-  { lo: 0.05,  hi: 0.10,  label: '5–10%'    },
-  { lo: 0.10,  hi: Infinity, label: '>10%'  }
+  { lo: 0.015, hi: 0.025, label: '1.5–2.5pp' },
+  { lo: 0.025, hi: 0.05,  label: '2.5–5pp'   },
+  { lo: 0.05,  hi: 0.10,  label: '5–10pp'    },
+  { lo: 0.10,  hi: Infinity, label: '>10pp'  }
 ];
 function calibrationRows() {
-  const tracked = [...st.pending, ...st.history]
-    .filter(p => p.closingLine != null && typeof p.edge === 'number');
+  const tracked = clvObservations().filter(p => typeof p.edge === 'number');
   return EDGE_BUCKETS.map(b => {
     const inB = tracked.filter(p => p.edge >= b.lo && p.edge < b.hi);
     const clvs = inB.map(p => cCLV(p.line, p.closingLine));
@@ -725,7 +908,7 @@ function calibrationCard() {
   <div class="card" style="padding:0;overflow:hidden">
     <div style="padding:14px 16px 10px">
       <div style="font-size:13px;font-weight:500;margin-bottom:2px">Edge calibration</div>
-      <div style="font-size:11px;color:var(--text3);line-height:1.6">Average CLV by modeled-edge bucket. If CLV rises as the edge bucket rises, the edge estimates are tracking something real. Flat or negative means the edge number isn't predictive yet. ${totalN < 20 ? `Only ${totalN} tracked so far — this needs a few hundred to read clearly.` : ''}</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6">Average CLV by modeled price-gap bucket, both in probability points, so the two are directly comparable. If CLV rises as the gap bucket rises, the estimates are tracking something real. Flat or negative means the gap number isn't predictive yet. ${totalN < 20 ? `Only ${totalN} verified closes tracked so far — this needs a few hundred to read clearly.` : ''}</div>
     </div>
     <table class="tbl"><tbody>
       <tr style="color:var(--text3)">
@@ -748,8 +931,7 @@ const ODDS_BUCKETS = [
   { lo: 250, hi: Infinity, label: '250+' }
 ];
 function oddsCalibrationRows() {
-  const tracked = [...st.pending, ...st.history]
-    .filter(p => p.closingLine != null && typeof p.line === 'number');
+  const tracked = clvObservations();
   return ODDS_BUCKETS.map(b => {
     const inB = tracked.filter(p => {
       const abs = Math.abs(p.line);
@@ -790,8 +972,7 @@ function oddsCalibrationCard() {
   </div>`;
 }
 function confidenceCalibrationRows() {
-  const tracked = [...st.pending, ...st.history]
-    .filter(p => p.closingLine != null && typeof p.confidence === 'number');
+  const tracked = clvObservations().filter(p => typeof p.confidence === 'number');
   const tiers = [
     { lo: 0.75, hi: 1.01, label: 'High' },
     { lo: 0.5,  hi: 0.75, label: 'Moderate' },
@@ -835,8 +1016,7 @@ function confidenceCalibrationCard() {
   </div>`;
 }
 function sportCalibrationRows() {
-  const tracked = [...st.pending, ...st.history]
-    .filter(p => p.closingLine != null && p.sport);
+  const tracked = clvObservations().filter(p => p.sport);
   const sports = [...new Set(tracked.map(p => p.sport))];
   return sports.map(sport => {
     const inB = tracked.filter(p => p.sport === sport);
@@ -938,7 +1118,9 @@ function render() {
   }, 0);
   const hasPF  = (W+L+P) > 0;
   const pColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-  const clvSet = [...st.pending, ...st.history].filter(p => p.closingLine != null);
+  // PHASE 0 (2.1 / 2.3): verified, de-duplicated observations only.
+  const clvSet = clvObservations();
+  const clvExcluded = clvExcludedCounts();
   const clvValues = clvSet.map(p => cCLV(p.line, p.closingLine));
   const avgClv = clvValues.length ? clvValues.reduce((a,b) => a+b, 0) / clvValues.length : null;
   const clvSd  = avgClv != null ? stdev(clvValues, avgClv) : null;
@@ -984,12 +1166,14 @@ function render() {
   : p.horizon === 'far'
     ? bdg('danger', 'far')
     : bdg('info', 'near');
-    const clv = p.closingLine != null ? cCLV(p.line, p.closingLine) : null;
+    const clv = isCapturedClose(p) ? cCLV(p.line, p.closingLine) : null;
     const clvTag = clv != null
       ? `<span class="mono" style="font-size:11px;font-weight:500;color:${clv>=0?'var(--green)':'var(--red)'}">${fCLV(clv)}</span>`
+      : p.closingLine != null
+      ? `<span style="font-size:11px;color:var(--text3)" title="Closing price not verified — excluded from CLV">unver.</span>`
       : `<span style="font-size:11px;color:var(--text3)">—</span>`;
     const edgeTag = typeof p.edge === 'number'
-      ? `<span class="mono" style="font-size:11px;color:var(--green)">${fE(p.edge)}</span>`
+      ? `<span class="mono" style="font-size:11px;color:var(--green)">${fGap(p.edge)}</span>`
       : '';
     const confTier = p.confMeta ? confidenceLabel(quantConfidence(p)).tier : null;
     const confTag = confTier ? bdg('neutral', confTier) : '';
@@ -1048,11 +1232,11 @@ function render() {
     <div style="margin-bottom:18px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
         <span style="font-size:13px;font-weight:500">Minimum edge</span>
-        <span class="mono" style="font-size:13px;color:var(--accent)">${(minEdge()*100).toFixed(1)}%</span>
+        <span class="mono" style="font-size:13px;color:var(--accent)">${(minEdge()*100).toFixed(1)}pp</span>
       </div>
       <input type="range" min="${MIN_EDGE_FLOOR*1000}" max="${MIN_EDGE_CEIL*1000}" step="1" value="${Math.round(minEdge()*1000)}"
         style="width:100%" oninput="EL.previewSetting('minEdge', this.value/1000)" onchange="EL.saveSetting('minEdge', this.value/1000)"/>
-      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">How big a modeled edge a play needs before it's surfaced. Lower = more plays, more marginal. Higher = fewer, higher-conviction. There's no provably correct value — it's a volume-vs-quality dial. Default 1.5%.</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">How big a price disagreement a play needs before it's surfaced, in probability points — the book's implied probability versus the reference. Lower = more plays, more marginal. Higher = fewer, higher-conviction. There's no provably correct value — it's a volume-vs-quality dial. Default 1.5pp. <strong>This is now measured in probability points, not expected value.</strong> The old EV floor let a +300 longshot qualify on roughly a third of the price disagreement a −200 favorite needed, so at the same numeric setting you will see fewer plays, weighted less toward long prices.</div>
     </div>
 
     <div style="margin-bottom:18px">
@@ -1193,6 +1377,7 @@ ${staleUnsettled.length > 0 ? `
   ` : ''}
 
   ${hasPicks ? aiPanel() : ''}
+  ${layerComparisonPanel()}
   ${leaderboardPanel()}
 
   <div class="card" style="font-size:13px;line-height:1.8;margin-top:8px">
@@ -1203,8 +1388,12 @@ ${staleUnsettled.length > 0 ? `
          <span class="mono" style="font-weight:500;color:${pColor}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span>
          <span style="color:var(--text2)"> at $${FLAT} flat</span>`
       : `<span style="color:var(--text2)">No results recorded yet. Use Pick history to settle each pick after games finish.</span>`}
-    ${avgClv != null ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">Avg CLV across ${clvSet.length} priced pick${clvSet.length===1?'':'s'}: <span class="mono" style="font-weight:500;color:${avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(avgClv)}${clvSE!=null?` ± ${(clvSE*1.96*100).toFixed(1)}pp (95% CI)`:''}</span> — the part of the record that isn't just variance.</div>` : ''}
+    ${avgClv != null ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">Avg CLV across ${clvSet.length} verified pick${clvSet.length===1?'':'s'}: <span class="mono" style="font-weight:500;color:${avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(avgClv)}${clvSE!=null?` ± ${(clvSE*1.96*100).toFixed(1)}pp (95% CI)`:''}</span> — the part of the record that isn't just variance.</div>` : ''}
     <div style="margin-top:6px;font-size:11px;color:var(--text3)">${sampleNote(clvSet.length)}</div>
+    ${clvExcluded.total > 0 ? `<div style="margin-top:6px;font-size:11px;color:var(--text3);line-height:1.6">
+      ${clvExcluded.total} close${clvExcluded.total===1?'':'s'} excluded from every number above:${clvExcluded.legacy ? ` ${clvExcluded.legacy} recorded before emBET tracked whether a closing price was actually observed;` : ''}${clvExcluded.fallback ? ` ${clvExcluded.fallback} where the market was never re-checked after kickoff;` : ''}${clvExcluded.duplicates ? ` ${clvExcluded.duplicates} duplicate${clvExcluded.duplicates===1?'':'s'} of the same wager at another book;` : ''}
+      counting any of them would have meant averaging in prices that were never seen, or the same bet more than once.
+    </div>` : ''}
   </div>
 
   ${clvSet.length > 0 ? calibrationCard() : ''}
@@ -1324,7 +1513,9 @@ window.EL = {
       embet_ai_models:       LS.get('embet_ai_models')       || DEFAULT_AI_MODELS,
       embet_worker_url:       LS.get('embet_worker_url')       || '',
       embet_model_perf:        LS.get('embet_model_perf')        || {},
-      embet_schema_v2:           LS.get('embet_schema_v2')           || false
+      embet_layer_batches:      LS.get('embet_layer_batches')      || [],
+      embet_schema_v2:           LS.get('embet_schema_v2')           || false,
+      embet_schema_v3:            LS.get('embet_schema_v3')            || false
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
@@ -1362,7 +1553,11 @@ window.EL = {
       if (data.embet_ai_models)    LS.set('embet_ai_models', data.embet_ai_models);
       if (data.embet_worker_url)   LS.set('embet_worker_url', data.embet_worker_url);
       if (data.embet_model_perf)   LS.set('embet_model_perf', data.embet_model_perf);
+      if (data.embet_layer_batches) LS.set('embet_layer_batches', data.embet_layer_batches);
       LS.set('embet_schema_v2', true);
+      // A v1/v2 backup restored into this build must be re-migrated, or its
+      // EV-unit edges and unmarked closing lines would be read as v3 data.
+      LS.set('embet_schema_v3', !!data.embet_schema_v3);
       window.alert('Backup restored. Reloading now.');
       window.location.reload();
     };
@@ -1373,6 +1568,7 @@ const MKT_KEY = { ML: 'h2h', Spread: 'spreads', Total: 'totals' };
 function captureClosing(g) {
   const now = Date.now();
   const matches = st.pending.filter(p => p.gameId === g.id && p.closingLine == null);
+  let changed = false;
   for (const p of matches) {
     const bm  = g.bookmakers.find(b => (b.title || b.key) === p.book);
     const mkt = bm?.markets?.find(m => m.key === MKT_KEY[p.mkt]);
@@ -1384,25 +1580,49 @@ function captureClosing(g) {
     const gameStarted = new Date(p.commenceTime).getTime() <= now;
     p.latestLine   = out.price;
     p.latestLineAt = new Date().toISOString();
+    changed = true;
     if (gameStarted) {
       p.closingLine   = out.price;
       p.closingAt     = new Date().toISOString();
       p.lineFinalized = true;
+      // PHASE 0 (2.1): this is the only path that produces a real closing
+      // price -- observed from the market at or after kickoff.
+      p.closeSource   = 'captured';
       updateModelLeaderboardCLV(p.id, cCLV(p.line, p.closingLine));
     }
   }
+  // PHASE 0: persist immediately. A later sport in the same scan can throw
+  // (a 429 aborts scan() before its LS.set), which previously discarded every
+  // close captured earlier in the same pass.
+  if (changed) LS.set('embet_pending', st.pending);
 }
+// PHASE 0 (2.1 / 2.2) -- rewritten.
+//
+// Defect: this wrote closingLine = latestLine ?? line for any started game.
+// For a pick where the app was not reopened between detection and kickoff,
+// latestLine still equalled the entry line (mergePending seeds it that way),
+// so the "closing line" was the entry line and CLV was exactly 0.00pp. It then
+// called updateModelLeaderboardCLV(), locking that fabricated zero into the AI
+// leaderboard as well. Nothing marked the value as unverified: lineFinalized
+// was set true on this path exactly as on the real capture path.
+//
+// Changes: (1) the fallback is tagged closeSource 'fallback' and is excluded
+// from every CLV statistic; (2) it no longer touches the model leaderboard;
+// (3) it waits FINALIZE_GRACE_MS past kickoff so captureClosing() gets real
+// chances at the market before an unverifiable value is written at all.
 function finalizeStalePending() {
   const now = Date.now();
   let changed = false;
   for (const p of st.pending) {
     if (p.closingLine != null) continue;
-    if (new Date(p.commenceTime).getTime() > now) continue;
+    const commence = new Date(p.commenceTime).getTime();
+    if (!isFinite(commence)) continue;
+    if (now - commence < FINALIZE_GRACE_MS) continue;
     p.closingLine   = p.latestLine != null ? p.latestLine : p.line;
     p.closingAt     = new Date().toISOString();
     p.lineFinalized = true;
+    p.closeSource   = 'fallback';
     changed = true;
-    updateModelLeaderboardCLV(p.id, cCLV(p.line, p.closingLine));
   }
   if (changed) LS.set('embet_pending', st.pending);
 }
@@ -1557,8 +1777,21 @@ async function scan() {
             for (const o of m.outcomes) {
               const fair = fm[oKey(o.name, o.point)];
               if (fair == null) continue;
-              const edge = cEV(fair, o.price);
-              if (edge <= minEdge()) continue;
+              // PHASE 0 (2.4): cEV() reduces algebraically to
+              //   fair*d - 1 = (fair - 1/d) * d = probability gap x decimal odds
+              // so a fixed EV floor admitted wildly different amounts of real
+              // market disagreement depending on price: a -200 favorite needed
+              // a 1.00pp gap to clear 1.5%, a +300 longshot only 0.38pp. That
+              // is the structural longshot bias the maxOddsCap display filter
+              // was papering over. It also made the edge-calibration table
+              // incoherent, since cCLV() is measured in probability points
+              // while edge was an EV fraction.
+              //
+              // Filter, rank and bucket on the probability gap -- the same unit
+              // as CLV. EV is retained for stake sizing, where it belongs.
+              const edgeProb = fair - iP(o.price);
+              const edgeEV   = cEV(fair, o.price);
+              if (edgeProb <= minEdge()) continue;
 
               const mktLbl = mkt === 'h2h' ? 'ML' : mkt === 'spreads' ? 'Spread' : 'Total';
               const pt     = o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : '';
@@ -1576,13 +1809,16 @@ async function scan() {
                 line:         o.price,
                 fairOdds:     tA(1 / fair),
                 fairProb:     fair,
-                edge,
+                edge:         edgeProb,   // primary unit: probability points
+                edgeProb,
+                edgeEV,                   // retained for stake sizing / analysis
                 sharp:        sharpRef,
                 pinnacleDeep: PINNACLE_DEEP.has(sport),
-                suspicious:   edge > SANITY_EDGE,
+                suspicious:   edgeProb > SANITY_EDGE,
                 confMeta:     meta[oppKey] || { nBooks: null, disp: null, pinProb: null },
                 closingLine:  null,
                 closingAt:    null,
+                closeSource:  'none',
                 result:       null
               };
               base.confidence = quantConfidence(base).score;
@@ -1659,7 +1895,7 @@ async function scan() {
     };
 
     st.picks = picks;
-    LS.set('embet_picks_' + today(), picks);
+    LS.set(PICKS_KEY(), picks);
 
     finalizeStalePending();
 
@@ -1707,6 +1943,62 @@ function migrateSchemaV2() {
   LS.set('embet_history', st.history);
   LS.set('embet_schema_v2', true);
 }
+// ---------------------------------------------------------------------------
+// PHASE 0 -- schema v3 migration
+//
+// Runs once, after migrateSchemaV2(), over whatever is already in localStorage.
+// Two things change shape, and both are handled without discarding data:
+//
+// 1. Edge units. Pre-patch `edge` held an EV fraction. fairProb and line were
+//    both already persisted on every record, so the probability gap is
+//    recomputed exactly rather than approximated. Records old enough to
+//    predate fairProb get edge = null and simply drop out of the edge-bucket
+//    table; they remain in every other table.
+//
+// 2. Closing-line provenance. Pre-patch, a genuine capture and a fabricated
+//    fallback were written identically -- closingAt = now, lineFinalized =
+//    true, no other marker -- so old rows genuinely cannot be told apart after
+//    the fact. Rather than guess, they are marked 'legacy' and excluded from
+//    CLV statistics. Nothing is deleted; the rows stay visible in Pick history
+//    and can be re-admitted later if a rule for classifying them is found.
+//
+// The same reasoning applies to embet_model_perf, whose locked clv_pp values
+// were written by the old fallback path.
+// ---------------------------------------------------------------------------
+function migrateSchemaV3() {
+  if (LS.get('embet_schema_v3')) return;
+
+  const fix = arr => (arr || []).map(p => {
+    if (!p) return p;
+    if (p.edgeProb === undefined) {
+      p.edgeEV   = typeof p.edge === 'number' ? p.edge : null;
+      p.edgeProb = (typeof p.fairProb === 'number' && typeof p.line === 'number')
+        ? p.fairProb - iP(p.line)
+        : null;
+      p.edge = p.edgeProb;
+    }
+    if (p.closeSource === undefined) {
+      p.closeSource = p.closingLine == null ? 'none' : 'legacy';
+    }
+    return p;
+  });
+
+  st.pending = fix(st.pending);
+  st.history = fix(st.history);
+  LS.set('embet_pending', st.pending);
+  LS.set('embet_history', st.history);
+
+  const perf = LS.get('embet_model_perf') || {};
+  let perfChanged = false;
+  for (const id in perf) {
+    for (const rec of (perf[id]?.picks || [])) {
+      if (rec.legacy === undefined) { rec.legacy = !!rec.clvLocked; perfChanged = true; }
+    }
+  }
+  if (perfChanged) LS.set('embet_model_perf', perf);
+
+  LS.set('embet_schema_v3', true);
+}
 function maybeAutoBackup() {
   const lastBackupAt = LS.get('embet_last_backup');
   const hasData = st.history.length > 0 || st.pending.length > 0;
@@ -1733,7 +2025,13 @@ if (pend) {
 }
 
   migrateSchemaV2();
-  finalizeStalePending();
+  migrateSchemaV3();
+  // PHASE 0 (2.2): finalizeStalePending() used to run HERE, before scan().
+  // captureClosing() only processes picks where closingLine == null, so the
+  // fallback locked in an unverifiable value moments before the network call
+  // that would have fetched the real one -- guaranteeing the fabricated close
+  // won every time. scan() already calls finalizeStalePending() after the scan
+  // loop (correctly placed), so this call is simply removed rather than moved.
   maybeAutoBackup();
 
   const br = LS.get('embet_bankroll');
@@ -1757,7 +2055,7 @@ if (pend) {
     return;
   }
 
-  const cached = LS.get('embet_picks_' + today());
+  const cached = LS.get(PICKS_KEY());
   if (cached && 'near' in cached) {
     const toArr = v => Array.isArray(v) ? v : (v ? [v] : []);
     st.picks = { ...cached, near: toArr(cached.near), future: toArr(cached.future), flagged: cached.flagged || [] };
