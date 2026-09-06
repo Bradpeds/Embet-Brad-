@@ -184,6 +184,7 @@
   </style>
 </head>
 <body>
+<div style="max-width:960px;margin:12px auto;padding:12px;font:13px/1.5 system-ui;background:#fff3cd;color:#664d03;border-radius:8px">Updated September 6 · Your saved bets stay in this browser. CLV uses timestamped prices observed within five minutes before kickoff, not in-play odds. Keep this page open near kickoff for capture; missed closes remain unverified. Historical bets and results are retained, but old unverified CLV and AI scores are excluded.</div>
 <div class="wrap">
   <div id="app"></div>
   <div style="text-align:center;margin-top:44px;font-size:11px;color:var(--text3);line-height:1.8">
@@ -227,7 +228,7 @@ const SANITY_EDGE = 0.10;
 const MIN_SCORED = 10;
 // Cached scan blobs are keyed by schema version: pre-patch blobs hold `edge`
 // in EV units and would render as probability points if reused.
-const PICKS_KEY = () => 'embet_picks_v3_' + today();
+const PICKS_KEY = () => 'embet_picks_v4_' + today();
 // Wait this long past kickoff before writing an unverifiable fallback close,
 // so captureClosing() gets real chances at the market first.
 const FINALIZE_GRACE_MS = 24 * 60 * 60 * 1000;
@@ -276,12 +277,20 @@ function stdev(arr, mean) {
   const v = arr.reduce((s, x) => s + (x - mean) ** 2, 0) / (arr.length - 1);
   return Math.sqrt(v);
 }
+function eventClusterSE(rows, mean) {
+  if (mean == null || rows.length < 2) return null;
+  const sums = new Map();
+  for (const p of rows) {
+    const k = p.gameId || p.game;
+    sums.set(k,(sums.get(k) || 0) + cCLV(p.line,p.closingLine) - mean);
+  }
+  const g = sums.size;
+  // Normal approximation only displayed with at least 30 event clusters.
+  if (g < 30) return null;
+  return Math.sqrt(g/(g-1) * [...sums.values()].reduce((a,x)=>a+x*x,0) / rows.length**2);
+}
 function sampleNote(n) {
-  if (n === 0)                  return 'No closing lines captured yet — every number above is still zero signal.';
-  if (n < SAMPLE_EARLY)         return `Only ${n} CLV-tracked pick${n===1?'':'s'} — this is still essentially noise. Don't read anything into it yet.`;
-  if (n < SAMPLE_DEVELOPING)    return `${n} CLV-tracked picks — an early, developing trend. Provisional at best until ~${SAMPLE_DEVELOPING}.`;
-  if (n < SAMPLE_MEANINGFUL)    return `${n} CLV-tracked picks — enough to start meaning something, though a real ROI conclusion wants ${SAMPLE_MEANINGFUL}+.`;
-  return `${n} CLV-tracked picks — a real sample. Positive average CLV through this many bets is the strongest evidence this is finding actual edge, not luck.`;
+  return n ? `${n} unique wagers with observed pregame proxies. This measures same-book implied-probability movement, including changes in margin. Intervals require at least 30 event clusters; positive CLV alone does not establish profitability.` : 'No eligible pregame closes yet. Saved bet results remain in your history.';
 }
 function shinProb(q1, q2) {
   const Q = q1 + q2;
@@ -342,18 +351,11 @@ function pickRankScore(o) {
   return 0.60 * edgeNorm + 0.40 * c;
 }
 function finalistPoolFromPicks(picks) {
-  const pool = [...(picks?.near || []), ...(picks?.future || [])]
-    .filter(p => p && !p.suspicious)
+  const pool = [...(picks?.researchFinalists || [...(picks?.near || []), ...(picks?.future || [])])]
+    .filter(p => p && !p.suspicious && Date.parse(p.commenceTime) > Date.now())
     .sort((a,b) => pickRankScore(b) - pickRankScore(a));
   const seen = new Set();
-  const out = [];
-  for (const p of pool) {
-    if (seen.has(p.id)) continue;
-    seen.add(p.id);
-    out.push(p);
-    if (out.length >= AI_FINALISTS) break;
-  }
-  return out;
+  return pool.filter(p => { const k = clvKey(p); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0,AI_FINALISTS);
 }
 function buildPrompts(candidates, hasSearch) {
   const searchInstr = hasSearch
@@ -363,7 +365,7 @@ function buildPrompts(candidates, hasSearch) {
   const systemPrompt = `You are Layer 2 of emBET: an AI adjudication panel sitting ABOVE the math, not replacing it.
 
 Architecture:
-Layer 1 has already scanned the market, de-vigged prices, filtered for a modeled price gap above the edge floor, ranked candidates by edge plus structural confidence, and produced exactly ${AI_FINALISTS} finalists. These are price disagreements between books — not guaranteed wins, not known positive expected value, just mathematically identified gaps worth evaluating.
+Layer 1 has already scanned the market, de-vigged prices, filtered for a modeled price gap above the edge floor, ranked candidates by edge plus structural confidence, and produced ${candidates.length} finalists. These are price disagreements between books — not guaranteed wins, not known positive expected value, just mathematically identified gaps worth evaluating.
 Layer 2 must choose ONE of those finalists. Do not recommend anything outside the finalist pool. Do not re-run the sportsbook math. Your job is to decide which identified price gap looks most likely to be real — not a data artifact, stale quote, or a line that has already moved — after broader contextual reasoning.
 
 Use all available reasoning sources freely: market structure, sport context, public-team bias, schedule spots, injury/lineup/weather risk, sharp-vs-soft-book implications, and whether the edge looks robust or fragile. ${searchInstr}
@@ -376,7 +378,7 @@ Return ONLY valid JSON. No markdown, no code fences, no prose outside JSON.
   "risk": "main reason this could be wrong"
 }`;
 
-  const userPrompt = `Top ${AI_FINALISTS} math-filtered finalists:\n${JSON.stringify(candidates.map((c, i) => ({
+  const userPrompt = `Top ${candidates.length} math-filtered finalists:\n${JSON.stringify(candidates.map((c, i) => ({
     finalistRank: i + 1,
     id: c.id,
     sport: c.sport,
@@ -431,42 +433,23 @@ function aiConsensus(modelResults) {
   const topId = Object.entries(counts).sort((a,b) => b[1] - a[1])[0]?.[0] || null;
   return { topPickId: topId, votes: counts[topId] || 0, total: vals.length };
 }
-function recordModelPicks(modelResults) {
-  const perf = LS.get('embet_model_perf') || {};
-  for (const [modelId, r] of Object.entries(modelResults || {})) {
-    if (!r) continue;
-    if (!perf[modelId]) perf[modelId] = { modelName: r.modelName, picks: [] };
-    if (perf[modelId].picks.some(p => p.pickId === r.topPickId)) continue;
-    perf[modelId].picks.push({
-      pickId: r.topPickId,
-      date: today(),
-      confidence: r.confidence || 'MEDIUM',
-      clv_pp: null,
-      clvLocked: false
-    });
-  }
-  LS.set('embet_model_perf', perf);
-}
-function updateModelLeaderboardCLV(pickId, clvFraction) {
-  const perf = LS.get('embet_model_perf') || {};
-  let changed = false;
-  for (const modelId in perf) {
-    const rec = perf[modelId].picks.find(p => p.pickId === pickId);
-    if (rec && !rec.clvLocked) {
-      rec.clv_pp = clvFraction * 100;
-      rec.clvLocked = true;
-      rec.legacy = false;   // written only from a verified captured close
-      changed = true;
-    }
-  }
-  if (changed) LS.set('embet_model_perf', perf);
-}
+
 async function runAllModels(candidates, basePicks) {
   const workerUrl = getWorkerUrl();
   const activeIds = getAiModels().filter(id => MODELS[id]);
-  if (!workerUrl || !activeIds.length || candidates.length < 1) return;
+  if (st.aiLoading || !workerUrl || !activeIds.length) return;
+  candidates = finalistPoolFromPicks({researchFinalists:candidates});
+  if (!candidates.length) return;
+  candidates = JSON.parse(JSON.stringify(candidates));
+  const requestedAt = new Date().toISOString();
+  const cutoff = Math.min(...candidates.map(p => Date.parse(p.commenceTime)));
+  const batch = { batchKey:uid(), schemaVersion:4, requestedAt,
+    candidates, layer1TopId:candidates[0].id, status:'requested', eligible:false,
+    settings:JSON.parse(JSON.stringify(st.settings)), models:activeIds.map(id => ({...MODELS[id]})) };
+  recordLayerBatch(batch);
 
   st.aiLoading = true;
+  try {
   st.aiStatuses = {};
   st.aiErrors = {};
   activeIds.forEach(id => st.aiStatuses[id] = 'loading');
@@ -496,21 +479,14 @@ async function runAllModels(candidates, basePicks) {
 
   const next = { ...(basePicks || st.picks), aiFinalists: candidates.map(c => c.id), modelResults, aiConsensus: consensus, aiGeneratedAt: new Date().toISOString(), layer1TopId, consensusId, aiChangedChoice };
   st.picks = next;
-  recordModelPicks(modelResults);
-  if (layer1TopId && consensusId) {
-    recordLayerBatch({
-      batchKey:    `${today()}|${candidates.map(c => c.id).join(',')}`,
-      date:        today(),
-      generatedAt: next.aiGeneratedAt,
-      finalists:   candidates.map(c => c.id),
-      layer1TopId, consensusId, aiChangedChoice,
-      votes:       consensus?.votes ?? null,
-      total:       consensus?.total ?? null
-    });
-  }
+  const completedAt = new Date().toISOString();
+  recordLayerBatch({ ...batch, completedAt, modelResults, errors:{...st.aiErrors},
+    consensusId, aiChangedChoice, votes:consensus?.votes || 0, total:consensus?.total || 0,
+    eligible:!!consensusId && Date.parse(completedAt) < cutoff,
+    status:!consensusId ? 'failed' : Date.parse(completedAt) >= cutoff ? 'late' : 'complete' });
   LS.set(PICKS_KEY(), next);
-  st.aiLoading = false;
-  render();
+  } catch (e) { st.err = `AI results could not be saved: ${e.message}`; }
+  finally { st.aiLoading = false; render(); }
 }
 function aiPanel() {
   const finalists = finalistPoolFromPicks(st.picks);
@@ -572,14 +548,14 @@ function aiPanel() {
 }
 function leaderboardPanel() {
   const perf = LS.get('embet_model_perf') || {};
-  const ids = Object.keys(perf).filter(id => perf[id]?.picks?.length);
+  const ids = [...new Set([...Object.keys(perf), ...studyBatches().flatMap(b => Object.keys(b.modelResults || {}))])];
   if (!ids.length) return '';
 
   const rows = ids.map(id => {
-    const data = perf[id];
+    const data = perf[id] || {modelName:MODELS[id]?.name || id, picks:[]};
     // PHASE 0 (2.1): pre-patch leaderboard entries were locked from fabricated
     // closes and cannot be re-derived, so they are excluded rather than trusted.
-    const evaluated = data.picks.filter(p => p.clvLocked && !p.legacy);
+    const evaluated = modelEvaluations(id);
     const hasEnough = evaluated.length >= MIN_SCORED;
     const avgCLV = evaluated.length ? evaluated.reduce((s,p) => s + p.clv_pp, 0) / evaluated.length : null;
     const statusTxt = !hasEnough ? `${evaluated.length}/${MIN_SCORED} needed`
@@ -591,16 +567,16 @@ function leaderboardPanel() {
         ${bdg(statusCls, statusTxt)}
       </div>
       <div style="color:var(--text3);margin-top:2px">
-        ${data.picks.length} picks chosen &middot; ${evaluated.length} settled${hasEnough ? ` &middot; avg CLV ${fCLV(avgCLV/100)}` : ''}
+        ${studyBatches().filter(b => b.modelResults?.[id]).length} prospective selections &middot; ${evaluated.length} settled${hasEnough ? ` &middot; avg CLV ${fCLV(avgCLV/100)}` : ''}
       </div>
     </div>`;
   }).join('');
 
-  return `<div class="section-divider">Model leaderboard</div>
+  return `<div class="section-divider">Model leaderboard — prospective records only</div>
   <div class="ai-card">
     <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:10px">
-      Tracks which finalist each AI model chose and how its picks actually settled against the closing line.
-      A model needs ${MIN_SCORED} settled picks before it gets a status label -- below that, it's too small a sample to mean anything.
+      Tracks prospective AI selections against an observed pregame price proxy. Older AI records remain in backups but do not receive scores.
+      A model needs ${MIN_SCORED} eligible scored picks before it gets a status label -- below that, it's too small a sample to mean anything.
     </div>
     ${rows}
   </div>`;
@@ -614,7 +590,7 @@ const fCLV  = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
 const fDT   = iso => new Date(iso).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
 const fDate = iso => new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const today = () => new Date().toISOString().slice(0,10);
-const uid   = () => Math.random().toString(36).slice(2,8);
+const uid = () => crypto.randomUUID();
 const esc   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 function daysUntil(iso) {
   const now = new Date();
@@ -626,7 +602,7 @@ function daysUntil(iso) {
 const mem = {};
 const LS = {
   get(k)   { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return mem[k]||null; } },
-  set(k,v) { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} mem[k]=v; }
+  set(k,v) { localStorage.setItem(k,JSON.stringify(v)); mem[k]=v; }
 };
 const st = { loading:true, aiLoading:false, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false, bankroll:null, settings:{}, showSettings:false, aiStatuses:{}, workerUrl:'', aiModels:DEFAULT_AI_MODELS };
 function bdg(cls, text) {
@@ -641,7 +617,7 @@ function rCard(p, type, isTop) {
     ? `<div style="margin-top:10px">${bdg(res==='W'?'success':res==='L'?'danger':'warning', res==='W'?'Win':res==='L'?'Loss':'Push')}</div>`
     : '';
   // PHASE 0 (2.1): only a close actually observed from the market after kickoff
-  // is reported as a Final CLV. A fallback or pre-patch close is shown as
+  // is reported as a Pregame proxy CLV. A fallback or pre-patch close is shown as
   // unverified rather than presented as a real result.
   const finalClv   = isCapturedClose(p) ? cCLV(p.line, p.closingLine) : null;
   const currentClv = (p.closingLine == null && p.latestLine != null) ? cCLV(p.line, p.latestLine) : null;
@@ -649,7 +625,7 @@ function rCard(p, type, isTop) {
     ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">
          Closing line: <span class="mono" style="color:var(--text)">${fO(p.closingLine)}</span>
          &ensp;&middot;&ensp;
-         <span class="mono" style="font-weight:500;color:${finalClv>=0?'var(--green)':'var(--red)'}">${fCLV(finalClv)} Final CLV</span>
+         <span class="mono" style="font-weight:500;color:${finalClv>=0?'var(--green)':'var(--red)'}">${fCLV(finalClv)} Pregame proxy CLV</span>
        </div>`
     : p.closingLine != null
     ? `<div style="margin-top:10px;font-size:11px;color:var(--text3)">
@@ -756,11 +732,20 @@ function flagCard(o) {
 //       two near-perfectly correlated observations. clvSE = sd/sqrt(n) assumes
 //       independence, so duplicates made the interval too narrow.
 //
-// Only closes actually observed from the market after kickoff are admissible,
+// Only timestamped pregame observations in the declared five-minute window are admissible,
 // and each underlying wager contributes exactly one row.
 // ---------------------------------------------------------------------------
+const CLOSE_WINDOW_MS = 5 * 60 * 1000;
+const validOdds = n => Number.isFinite(n) && Math.abs(n) >= 100;
 function isCapturedClose(p) {
-  return !!p && p.closingLine != null && p.closeSource === 'captured';
+  const e = p?.closeEvidence, start = Date.parse(p?.commenceTime);
+  const quote = Date.parse(e?.quoteAt), observed = Date.parse(e?.observedAt);
+  return !!e && p.closeSource === 'captured' && e.method === 'observed-pregame-v1' &&
+    validOdds(p.line) && validOdds(p.closingLine) && p.closingLine === e.price &&
+    Number.isFinite(start) && Number.isFinite(quote) && Number.isFinite(observed) &&
+    quote <= observed && observed < start && start - quote <= CLOSE_WINDOW_MS &&
+    Date.now() >= start && e.gameId === p.gameId && e.mkt === p.mkt &&
+    e.bet === p.bet && e.book === p.book;
 }
 function clvKey(p) {
   return `${p.gameId || p.game || '?'}|${p.mkt || '?'}|${p.bet || '?'}`;
@@ -807,25 +792,47 @@ function capturedById() {
 }
 function layerBatches() { return LS.get('embet_layer_batches') || []; }
 function recordLayerBatch(batch) {
-  const log = layerBatches();
-  if (log.some(b => b.batchKey === batch.batchKey)) return;
-  log.push(batch);
-  LS.set('embet_layer_batches', log.slice(-500));
+  const log = layerBatches(), i = log.findIndex(b => b.batchKey === batch.batchKey);
+  if (i < 0) log.push(batch); else log[i] = batch;
+  LS.set('embet_layer_batches', log);
+}
+function studyBatches() {
+  return layerBatches().filter(b => b.schemaVersion === 4 && b.eligible &&
+    b.status === 'complete' && Array.isArray(b.candidates))
+    .sort((a,b) => a.requestedAt.localeCompare(b.requestedAt));
+}
+function modelEvaluations(modelId) {
+  const closes = capturedById(), seen = new Set(), out = [];
+  for (const b of studyBatches()) {
+    const r = b.modelResults?.[modelId];
+    const entry = b.candidates.find(p => p.id === r?.topPickId);
+    if (!entry || seen.has(clvKey(entry))) continue;
+    seen.add(clvKey(entry)); // select the first decision before inspecting its close
+    const close = closes.get(entry.id);
+    if (close) out.push({clv_pp:100*cCLV(entry.line,close.closingLine)});
+  }
+  return out;
 }
 function layerComparison() {
   const byId = capturedById();
   const pairs = [];
-  for (const b of layerBatches()) {
-    const a = byId.get(b.layer1TopId), c = byId.get(b.consensusId);
+  const usedEvents = new Set();
+  for (const b of studyBatches()) {
+    const a = b.candidates.find(p => p.id === b.layer1TopId);
+    const c = b.candidates.find(p => p.id === b.consensusId);
     if (!a || !c) continue;
-    pairs.push({ l1: cCLV(a.line, a.closingLine), l2: cCLV(c.line, c.closingLine), changed: !!b.aiChangedChoice });
+    if ([a.gameId,c.gameId].some(id => usedEvents.has(id))) continue;
+    usedEvents.add(a.gameId); usedEvents.add(c.gameId);
+    const ac = byId.get(a.id), cc = byId.get(c.id);
+    if (!ac || !cc) continue;
+    pairs.push({l1:cCLV(a.line,ac.closingLine),l2:cCLV(c.line,cc.closingLine),changed:b.aiChangedChoice});
   }
   if (!pairs.length) return null;
   const mean  = xs => xs.reduce((s,x) => s+x, 0) / xs.length;
   const diffs = pairs.map(p => p.l2 - p.l1);
   const md    = mean(diffs);
   const sd    = stdev(diffs, md);
-  const se    = (sd != null && diffs.length > 1) ? sd / Math.sqrt(diffs.length) : null;
+  const se    = (sd != null && diffs.length >= 30) ? sd / Math.sqrt(diffs.length) : null;
   const chg   = pairs.filter(p => p.changed);
   return {
     n: pairs.length,
@@ -859,7 +866,7 @@ function layerComparisonPanel() {
       ${c.nChanged>0
         ? `The AI changed the pick in ${c.nChanged} of them; on those alone the difference is ${fCLV(c.diffChanged)}.`
         : `The AI has not yet disagreed with Layer 1 on any settled batch, so the two columns are still measuring the same picks.`}
-      ${c.n < LAYER_TARGET_BATCHES ? ` Roughly ${LAYER_TARGET_BATCHES} paired batches are needed before a difference this size separates from noise — this is instrumentation, not a result.` : ''}
+      ${c.n < LAYER_TARGET_BATCHES ? ` Only first eligible comparisons with non-overlapping events are counted. Sample size alone does not establish an AI advantage.` : ''}
     </div>
   </div>`;
 }
@@ -873,7 +880,7 @@ const EDGE_BUCKETS = [
   { lo: 0.10,  hi: Infinity, label: '>10pp'  }
 ];
 function calibrationRows() {
-  const tracked = clvObservations().filter(p => typeof p.edge === 'number');
+  const tracked = clvObservations().filter(p => p.entrySchema === 4 && typeof p.edge === 'number');
   return EDGE_BUCKETS.map(b => {
     const inB = tracked.filter(p => p.edge >= b.lo && p.edge < b.hi);
     const clvs = inB.map(p => cCLV(p.line, p.closingLine));
@@ -972,7 +979,7 @@ function oddsCalibrationCard() {
   </div>`;
 }
 function confidenceCalibrationRows() {
-  const tracked = clvObservations().filter(p => typeof p.confidence === 'number');
+  const tracked = clvObservations().filter(p => p.entrySchema === 4 && typeof p.confidence === 'number');
   const tiers = [
     { lo: 0.75, hi: 1.01, label: 'High' },
     { lo: 0.5,  hi: 0.75, label: 'Moderate' },
@@ -1059,7 +1066,7 @@ function render() {
   const app = document.getElementById('app');
   if (!app) return;
 
-  if (!st.keyReady) {
+  if (!st.keyReady && !st.offlineHistory) {
     app.innerHTML = `
     <div style="max-width:460px;margin:40px auto 0">
       <div style="margin-bottom:28px">
@@ -1071,20 +1078,20 @@ function render() {
         <p style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:16px">
           Get a free key at
           <a href="https://the-odds-api.com" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">the-odds-api.com</a>.
-          Free tier covers ~500 requests/month—enough for daily use.
-          Your key stays in your browser and is never shared.
+          Scanning and close tracking use your Odds API quota. Your key is stored in this browser and sent only to The Odds API for requests.
         </p>
         <input id="key-inp" type="password" placeholder="Paste your key here"
           style="width:100%;padding:9px 12px;border:0.5px solid var(--border-md);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--sans);margin-bottom:12px;box-sizing:border-box"
           onkeydown="if(event.key==='Enter') EL.saveKey()"/>
         <button class="btn" style="background:var(--accent-bg);border-color:var(--accent-border);color:var(--accent);font-weight:500" onclick="EL.saveKey()">Connect</button>
+        <button class="btn" onclick="EL.viewHistory()">View history / restore backup</button>
       </div>
     </div>`;
     return;
   }
 
   if (st.settleId) {
-    const p = [...(st.picks?.near||[]), ...(st.picks?.future||[]), ...st.pending, ...st.history].find(x => x && x.id === st.settleId);
+    const p = [...st.history,...st.pending].find(x => x && x.id === st.settleId);
     if (!p) { st.settleId = null; render(); return; }
     const cur = getRes(p.id) || '';
     app.innerHTML = `
@@ -1124,7 +1131,7 @@ function render() {
   const clvValues = clvSet.map(p => cCLV(p.line, p.closingLine));
   const avgClv = clvValues.length ? clvValues.reduce((a,b) => a+b, 0) / clvValues.length : null;
   const clvSd  = avgClv != null ? stdev(clvValues, avgClv) : null;
-  const clvSE  = (clvSd != null && clvValues.length > 1) ? clvSd / Math.sqrt(clvValues.length) : null;
+  const clvSE = eventClusterSE(clvSet, avgClv);
 
   const STALE_UNSETTLED_MS = 14 * 24 * 60 * 60 * 1000;
   const staleUnsettled = st.pending.filter(p => {
@@ -1153,7 +1160,7 @@ function render() {
       if (bPast && !bSettled && !(aPast && !aSettled)) return 1;
       return Math.abs(new Date(a.commenceTime) - Date.now()) - Math.abs(new Date(b.commenceTime) - Date.now());
     })
-    .slice(0, 20);
+    .slice(0, st.historyLimit || 20);
 
   const histRows = allHist.map(p => {
     const r   = getRes(p.id) || p.result;
@@ -1263,7 +1270,7 @@ function render() {
       </div>
       <input type="range" min="${TOP_N_FLOOR}" max="${TOP_N_CEIL}" step="1" value="${topN()}"
         style="width:100%" oninput="EL.previewSetting('topN', parseInt(this.value,10))" onchange="EL.saveSetting('topN', parseInt(this.value,10))"/>
-      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">How many top plays to show in each window (near / future). More picks = more of the day's total EV captured, but more bets to track and more day-to-day variance. Doesn't use extra API calls. Default 3.</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">How many top plays to show in each window (near / future). This changes the display only; the research cohort and AI finalist pool are tracked independently. Doesn't use extra API calls. Default 3.</div>
     </div>
 
     <div style="margin-top:18px;padding-top:16px;border-top:0.5px solid var(--border)">
@@ -1347,8 +1354,8 @@ ${staleUnsettled.length > 0 ? `
     <div style="font-size:15px;font-weight:500;color:var(--text);margin-bottom:8px">Nothing in the displayed windows</div>
     <div style="font-size:13px;margin-bottom:16px">${st.picks.hidden} play${st.picks.hidden===1?'':'s'} cleared the ${(minEdge()*100).toFixed(1)}% edge floor this scan, but landed outside what's shown here.${(Math.max(st.picks.nearTruncated||0, st.picks.futureTruncated||0) > 0) ? ` At least ${Math.max(st.picks.nearTruncated||0, st.picks.futureTruncated||0)} of those were cut purely by the picks-per-window setting (currently ${topN()}) — raising it would surface them, not change what the scan actually found.` : ` These are further out than the display windows reach, or beyond the top few flagged sanity-cap items — raising picks-per-window won't bring these specific ones back.`}</div>
     ` : `
-    <div style="font-size:15px;font-weight:500;color:var(--text);margin-bottom:8px">No plays found</div>
-    <div style="font-size:13px;margin-bottom:16px">No plays at or above the ${(minEdge()*100).toFixed(1)}% edge floor as of the last scan${st.picks?` (${new Date(st.picks.generatedAt).toLocaleTimeString()})`:''}. All ${st.picks?.sportsTried||0} sport requests succeeded — this means the board was actually checked and found quiet, not that something failed silently. Lines move throughout the day, so this can change without you doing anything — rescan to check the current board.</div>
+    <div style="font-size:15px;font-weight:500;color:var(--text);margin-bottom:8px">${st.picks ? 'No plays found' : 'History mode — no scan loaded'}</div>
+    <div style="font-size:13px;margin-bottom:16px">${!st.picks ? 'Your saved history is available below. Connect your Odds API key to scan current picks.' : `No plays at or above the ${(minEdge()*100).toFixed(1)}% edge floor as of the last scan${st.picks?` (${new Date(st.picks.generatedAt).toLocaleTimeString()})`:''}. All ${st.picks?.sportsTried||0} sport requests succeeded — this means the board was actually checked and found quiet, not that something failed silently. Lines move throughout the day, so this can change without you doing anything — rescan to check the current board.`}</div>
     `}
     <div style="display:flex;gap:8px;justify-content:center">
       <button class="btn" onclick="EL.retry()">Rescan now</button>
@@ -1388,11 +1395,11 @@ ${staleUnsettled.length > 0 ? `
          <span class="mono" style="font-weight:500;color:${pColor}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span>
          <span style="color:var(--text2)"> at $${FLAT} flat</span>`
       : `<span style="color:var(--text2)">No results recorded yet. Use Pick history to settle each pick after games finish.</span>`}
-    ${avgClv != null ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">Avg CLV across ${clvSet.length} verified pick${clvSet.length===1?'':'s'}: <span class="mono" style="font-weight:500;color:${avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(avgClv)}${clvSE!=null?` ± ${(clvSE*1.96*100).toFixed(1)}pp (95% CI)`:''}</span> — the part of the record that isn't just variance.</div>` : ''}
+    ${avgClv != null ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">Avg CLV across ${clvSet.length} pregame-proxy pick${clvSet.length===1?'':'s'}: <span class="mono" style="font-weight:500;color:${avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(avgClv)}${clvSE!=null?` ± ${(clvSE*1.96*100).toFixed(1)}pp (approx. 95% interval)`:''}</span> — same-book price movement; the interval groups wagers by event.</div>` : ''}
     <div style="margin-top:6px;font-size:11px;color:var(--text3)">${sampleNote(clvSet.length)}</div>
     ${clvExcluded.total > 0 ? `<div style="margin-top:6px;font-size:11px;color:var(--text3);line-height:1.6">
-      ${clvExcluded.total} close${clvExcluded.total===1?'':'s'} excluded from every number above:${clvExcluded.legacy ? ` ${clvExcluded.legacy} recorded before emBET tracked whether a closing price was actually observed;` : ''}${clvExcluded.fallback ? ` ${clvExcluded.fallback} where the market was never re-checked after kickoff;` : ''}${clvExcluded.duplicates ? ` ${clvExcluded.duplicates} duplicate${clvExcluded.duplicates===1?'':'s'} of the same wager at another book;` : ''}
-      counting any of them would have meant averaging in prices that were never seen, or the same bet more than once.
+      ${clvExcluded.total} close${clvExcluded.total===1?'':'s'} excluded from CLV statistics (bet results are retained):${clvExcluded.legacy ? ` ${clvExcluded.legacy} recorded before emBET tracked whether a closing price was actually observed;` : ''}${clvExcluded.fallback ? ` ${clvExcluded.fallback} without a qualifying pregame observation;` : ''}${clvExcluded.duplicates ? ` ${clvExcluded.duplicates} duplicate${clvExcluded.duplicates===1?'':'s'} of the same wager at another book;` : ''}
+      their pregame timing cannot be verified, or they duplicate an already counted wager.
     </div>` : ''}
   </div>
 
@@ -1404,14 +1411,16 @@ ${staleUnsettled.length > 0 ? `
   ${allHist.length > 0 ? `
   <div class="card" style="padding:0;overflow:hidden">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer" onclick="EL.toggleHist()">
-      <span style="font-size:13px;font-weight:500">Pick history</span>
+      <span style="font-size:13px;font-weight:500">Pick history (${st.history.length} recorded · ${st.pending.length} pending)</span>
       <button class="btn" style="font-size:11px;padding:3px 10px">${st.showHist?'Hide':'Show'}</button>
     </div>
-    ${st.showHist ? `<div style="overflow-x:auto"><table class="tbl"><tbody>${histRows}</tbody></table></div>` : ''}
+    ${st.showHist ? `<div style="overflow-x:auto"><table class="tbl"><tbody>${histRows}</tbody></table></div>${allHist.length < st.history.length + st.pending.length ? `<button class="btn" style="margin:12px" onclick="EL.moreHistory()">Show more records</button>` : ''}` : ''}
   </div>` : ''}
   `;
 }
 window.EL = {
+  moreHistory() { st.historyLimit = (st.historyLimit || 20) + 50; render(); },
+  viewHistory() { st.offlineHistory = true; st.loading = false; render(); },
   saveKey() {
     const v = (document.getElementById('key-inp') || {}).value || '';
     if (!v.trim()) return;
@@ -1491,7 +1500,7 @@ window.EL = {
     render();
   },
   async settle(id, result) {
-    const pick = [...(st.picks?.near||[]), ...(st.picks?.future||[]), ...st.pending, ...st.history].find(p => p && p.id === id);
+    const pick = [...st.history, ...st.pending].find(p => p && p.id === id);
     if (!pick) return;
     const done = { ...pick, result, settledAt: new Date().toISOString() };
     const i    = st.history.findIndex(h => h.id === id);
@@ -1504,7 +1513,7 @@ window.EL = {
   },
   exportBackup() {
     const backup = {
-      version: 1,
+      version: 4,
       exportedAt: new Date().toISOString(),
       embet_history:     LS.get('embet_history')     || [],
       embet_pending:      LS.get('embet_pending')      || [],
@@ -1515,7 +1524,8 @@ window.EL = {
       embet_model_perf:        LS.get('embet_model_perf')        || {},
       embet_layer_batches:      LS.get('embet_layer_batches')      || [],
       embet_schema_v2:           LS.get('embet_schema_v2')           || false,
-      embet_schema_v3:            LS.get('embet_schema_v3')            || false
+      embet_schema_v3:            LS.get('embet_schema_v3')            || false,
+      embet_schema_v4: LS.get('embet_schema_v4') || false
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
@@ -1546,18 +1556,8 @@ window.EL = {
       }
       const ok = window.confirm('This will REPLACE your current history, pending picks, and settings with the contents of this backup file. This cannot be undone. Continue?');
       if (!ok) return;
-      if (data.embet_history)      LS.set('embet_history', data.embet_history);
-      if (data.embet_pending)      LS.set('embet_pending', data.embet_pending);
-      if (data.embet_settings)     LS.set('embet_settings', data.embet_settings);
-      if (data.embet_bankroll != null) LS.set('embet_bankroll', data.embet_bankroll);
-      if (data.embet_ai_models)    LS.set('embet_ai_models', data.embet_ai_models);
-      if (data.embet_worker_url)   LS.set('embet_worker_url', data.embet_worker_url);
-      if (data.embet_model_perf)   LS.set('embet_model_perf', data.embet_model_perf);
-      if (data.embet_layer_batches) LS.set('embet_layer_batches', data.embet_layer_batches);
-      LS.set('embet_schema_v2', true);
-      // A v1/v2 backup restored into this build must be re-migrated, or its
-      // EV-unit edges and unmarked closing lines would be read as v3 data.
-      LS.set('embet_schema_v3', !!data.embet_schema_v3);
+      try { restoreBackupData(data); }
+      catch (err) { window.alert(`Backup was not restored: ${err.message}`); return; }
       window.alert('Backup restored. Reloading now.');
       window.location.reload();
     };
@@ -1565,102 +1565,83 @@ window.EL = {
   }
 };
 const MKT_KEY = { ML: 'h2h', Spread: 'spreads', Total: 'totals' };
-function captureClosing(g) {
-  const now = Date.now();
-  const matches = st.pending.filter(p => p.gameId === g.id && p.closingLine == null);
-  let changed = false;
-  for (const p of matches) {
-    const bm  = g.bookmakers.find(b => (b.title || b.key) === p.book);
-    const mkt = bm?.markets?.find(m => m.key === MKT_KEY[p.mkt]);
-    const out = mkt?.outcomes?.find(o => {
-      const pt = o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : '';
-      return p.bet === `${o.name}${pt}`;
-    });
-    if (!out || out.price == null) continue;
-    const gameStarted = new Date(p.commenceTime).getTime() <= now;
-    p.latestLine   = out.price;
-    p.latestLineAt = new Date().toISOString();
-    changed = true;
-    if (gameStarted) {
-      p.closingLine   = out.price;
-      p.closingAt     = new Date().toISOString();
-      p.lineFinalized = true;
-      // PHASE 0 (2.1): this is the only path that produces a real closing
-      // price -- observed from the market at or after kickoff.
-      p.closeSource   = 'captured';
-      updateModelLeaderboardCLV(p.id, cCLV(p.line, p.closingLine));
-    }
-  }
-  // PHASE 0: persist immediately. A later sport in the same scan can throw
-  // (a 429 aborts scan() before its LS.set), which previously discarded every
-  // close captured earlier in the same pass.
-  if (changed) LS.set('embet_pending', st.pending);
+function persistRecords() {
+  LS.set('embet_pending', st.pending);
+  LS.set('embet_history', st.history);
 }
-// PHASE 0 (2.1 / 2.2) -- rewritten.
-//
-// Defect: this wrote closingLine = latestLine ?? line for any started game.
-// For a pick where the app was not reopened between detection and kickoff,
-// latestLine still equalled the entry line (mergePending seeds it that way),
-// so the "closing line" was the entry line and CLV was exactly 0.00pp. It then
-// called updateModelLeaderboardCLV(), locking that fabricated zero into the AI
-// leaderboard as well. Nothing marked the value as unverified: lineFinalized
-// was set true on this path exactly as on the real capture path.
-//
-// Changes: (1) the fallback is tagged closeSource 'fallback' and is excluded
-// from every CLV statistic; (2) it no longer touches the model leaderboard;
-// (3) it waits FINALIZE_GRACE_MS past kickoff so captureClosing() gets real
-// chances at the market before an unverifiable value is written at all.
+function captureClosing(g) {
+  const now = Date.now(), start = Date.parse(g.commence_time);
+  if (!Number.isFinite(start)) return;
+  let changed = false;
+  for (const p of [...st.pending, ...st.history].filter(p => p.gameId === g.id)) {
+    // A schedule change invalidates the previously collected close evidence.
+    if (Date.parse(p.commenceTime) !== start) {
+      p.commenceTime = g.commence_time;
+      delete p.preClose;
+      if (p.closeSource === 'captured') p.closeSource = 'legacy';
+      changed = true;
+    }
+    if (now >= start || p.closingLine != null) continue;
+    const bm = g.bookmakers?.find(b => (b.title || b.key) === p.book);
+    const market = bm?.markets?.find(m => m.key === MKT_KEY[p.mkt]);
+    const out = market?.outcomes?.find(o => p.bet === `${o.name}${o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : ''}`);
+    const quoteAt = market?.last_update || bm?.last_update;
+    const qt = Date.parse(quoteAt);
+    if (!out || !validOdds(out.price) || !Number.isFinite(qt) || qt > now) continue;
+    p.latestLine = out.price;
+    p.latestLineAt = new Date(now).toISOString();
+    if (start - qt <= CLOSE_WINDOW_MS && (!p.preClose || qt >= Date.parse(p.preClose.quoteAt))) {
+      p.preClose = { method:'observed-pregame-v1', quoteAt,
+        observedAt:new Date(now).toISOString(), price:out.price,
+        gameId:p.gameId, mkt:p.mkt, bet:p.bet, book:p.book };
+    }
+    changed = true;
+  }
+  if (changed) persistRecords();
+}
 function finalizeStalePending() {
   const now = Date.now();
   let changed = false;
-  for (const p of st.pending) {
+  for (const p of [...st.pending, ...st.history]) {
     if (p.closingLine != null) continue;
-    const commence = new Date(p.commenceTime).getTime();
-    if (!isFinite(commence)) continue;
-    if (now - commence < FINALIZE_GRACE_MS) continue;
-    p.closingLine   = p.latestLine != null ? p.latestLine : p.line;
-    p.closingAt     = new Date().toISOString();
+    const start = Date.parse(p.commenceTime);
+    if (!Number.isFinite(start) || now < start) continue;
+    const candidate = { ...p, closingLine:p.preClose?.price,
+      closeSource:'captured', closeEvidence:p.preClose };
+    if (isCapturedClose(candidate)) {
+      p.closingLine = candidate.closingLine;
+      p.closeEvidence = { ...p.preClose };
+      p.closeSource = 'captured';
+    } else if (now - start >= FINALIZE_GRACE_MS) {
+      // Preserve the old fallback display, but never score it.
+      p.closingLine = p.latestLine ?? p.line;
+      p.closeSource = 'fallback';
+    } else continue;
+    p.closingAt = new Date(now).toISOString();
     p.lineFinalized = true;
-    p.closeSource   = 'fallback';
     changed = true;
   }
-  if (changed) LS.set('embet_pending', st.pending);
+  if (changed) persistRecords();
 }
+
 function mergePending(pick) {
   if (!pick) return null;
-  const idx = st.pending.findIndex(p =>
-    p.gameId === pick.gameId && p.mkt === pick.mkt && p.bet === pick.bet && p.book === pick.book
-  );
-  const freshPrice = pick.line;
-  if (idx >= 0) {
-    const existing = st.pending[idx];
-    const stillOpen = existing.closingLine == null;
-    const merged = {
-      ...pick,
-      id:            existing.id,
-      line:          existing.line,
-      latestLine:    stillOpen ? freshPrice : existing.latestLine,
-      latestLineAt:  stillOpen ? new Date().toISOString() : existing.latestLineAt,
-      closingLine:   existing.closingLine,
-      closingAt:     existing.closingAt,
-      lineFinalized: existing.lineFinalized || false,
-      result:        existing.result
-    };
-    st.pending[idx] = merged;
-    return merged;
+  const existing = [...st.pending, ...st.history].find(p =>
+    p.gameId === pick.gameId && p.mkt === pick.mkt && p.bet === pick.bet && p.book === pick.book);
+  if (existing) {
+    if (!existing.sportKey && pick.sportKey) existing.sportKey = pick.sportKey;
+    return { ...pick, id:existing.id, result:existing.result };
   }
-  const fresh = {
-    ...pick,
-    latestLine:    freshPrice,
-    latestLineAt:  new Date().toISOString(),
-    closingLine:   null,
-    closingAt:     null,
-    lineFinalized: false
-  };
-  st.pending.push(fresh);
-  return fresh;
+  const entry = { ...pick, detectedAt:new Date().toISOString(), entrySchema:4,
+    latestLine:pick.line, latestLineAt:new Date().toISOString(),
+    closingLine:null, closingAt:null, closeSource:'none', lineFinalized:false };
+  st.pending.push(entry);
+  return { ...entry };
 }
 async function scan() {
+  if (!AK) { st.offlineHistory = false; st.loading = false; render(); return; }
+  if (st.scanning) return;
+  st.scanning = true;
   try {
     const sRes = await fetch(`${OB}/sports/?apiKey=${AK}`);
     if (!sRes.ok) throw new Error(`Sports list error ${sRes.status}. Check the API key.`);
@@ -1672,6 +1653,7 @@ async function scan() {
       ...active.filter(s => !PRI.includes(s.key)).map(s => s.key)
     ].slice(0, 8);
 
+    const scannedGames = [];
     const opps = [];
     const failedSports = [];
 
@@ -1691,6 +1673,7 @@ async function scan() {
       }
 
       const games    = await res.json();
+      scannedGames.push(...games);
       const now      = new Date();
       const sportLbl = allSports.find(s => s.key === sport)?.title || sport;
 
@@ -1738,13 +1721,14 @@ async function scan() {
             }
             const byPoint = {};
             for (const k in pools) {
-              const pk = String(pools[k].point);
+              const pk = String(mkt === 'spreads' ? Math.abs(pools[k].point) : pools[k].point);
               (byPoint[pk] ||= []).push(k);
             }
             let bestKeys = null, bestCount = 0;
             for (const pk in byPoint) {
               const keys = byPoint[pk];
               if (keys.length !== 2) continue;
+              if (mkt === 'spreads' && (pools[keys[0]].point !== -pools[keys[1]].point || keys[0].split('|')[0] === keys[1].split('|')[0])) continue;
               const count = keys.reduce((s, k) => s + pools[k].prices.length, 0);
               if (count > bestCount) { bestCount = count; bestKeys = keys; }
             }
@@ -1776,7 +1760,7 @@ async function scan() {
 
             for (const o of m.outcomes) {
               const fair = fm[oKey(o.name, o.point)];
-              if (fair == null) continue;
+              if (!Number.isFinite(fair) || fair <= 0 || fair >= 1 || !validOdds(o.price)) continue;
               // PHASE 0 (2.4): cEV() reduces algebraically to
               //   fair*d - 1 = (fair - 1/d) * d = probability gap x decimal odds
               // so a fixed EV floor admitted wildly different amounts of real
@@ -1791,7 +1775,7 @@ async function scan() {
               // as CLV. EV is retained for stake sizing, where it belongs.
               const edgeProb = fair - iP(o.price);
               const edgeEV   = cEV(fair, o.price);
-              if (edgeProb <= minEdge()) continue;
+              if (edgeProb < minEdge()) continue;
 
               const mktLbl = mkt === 'h2h' ? 'ML' : mkt === 'spreads' ? 'Spread' : 'Total';
               const pt     = o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : '';
@@ -1801,6 +1785,7 @@ async function scan() {
                 id:           uid(),
                 gameId:       g.id,
                 sport:        sportLbl,
+                sportKey:     sport,
                 game:         `${g.away_team} @ ${g.home_team}`,
                 commenceTime: g.commence_time,
                 mkt:          mktLbl,
@@ -1858,19 +1843,26 @@ async function scan() {
     // why, the same way it already is for topN truncation.
     const oddsCappedCount = opps.filter(o => !o.suspicious && !passesOddsCap(o)).length;
 
+    // Track the full non-suspicious research cohort independently of display limits.
+    const tracked = new Map(opps.filter(o => !o.suspicious).map(o => {
+      const p = mergePending(o); return [o.id, p];
+    }));
+    const researchFinalists = finalistPoolFromPicks({researchFinalists:
+      [...nearOpps,...futureOpps].map(o => tracked.get(o.id))});
     const near = nearOpps
       .slice(0, topN())
-      .map(o => mergePending({ ...o, horizon: 'near' }));
+      .map(o => ({...tracked.get(o.id), horizon:'near'}));
     const future = futureOpps
       .slice(0, topN())
-      .map(o => mergePending({ ...o, horizon: 'future' }));
+      .map(o => ({...tracked.get(o.id), horizon:'future'}));
     LS.set('embet_pending', st.pending);
 
     const nearTruncated   = Math.max(0, nearOpps.length - near.length);
     const futureTruncated = Math.max(0, futureOpps.length - future.length);
     const far = farOpps
       .slice(0, topN())
-      .map(o => mergePending({ ...o, horizon: 'far' }));
+      .map(o => ({...tracked.get(o.id), horizon:'far'}));
+    persistRecords();
     const farTruncated = Math.max(0, farOpps.length - far.length);
     const hiddenCount = farTruncated
       + Math.max(0, flaggedAll.length - flagged.length)
@@ -1881,6 +1873,7 @@ async function scan() {
     const picks = {
       date:        today(),
       generatedAt: new Date().toISOString(),
+      researchFinalists,
       near,
       future,
       far,
@@ -1897,6 +1890,7 @@ async function scan() {
     st.picks = picks;
     LS.set(PICKS_KEY(), picks);
 
+    scannedGames.forEach(captureClosing);
     finalizeStalePending();
 
     const aiFinalists = finalistPoolFromPicks(picks);
@@ -1908,6 +1902,7 @@ async function scan() {
     st.err = e.message || 'Failed to fetch odds.';
   }
 
+  st.scanning = false;
   st.loading = false;
   render();
 }
@@ -1999,6 +1994,99 @@ function migrateSchemaV3() {
 
   LS.set('embet_schema_v3', true);
 }
+function restoreBackupData(data) {
+  for (const key of ['embet_history','embet_pending']) {
+    if (data[key] !== undefined && (!Array.isArray(data[key]) || data[key].some(p =>
+      !p || typeof p !== 'object' || typeof p.id !== 'string' || !validOdds(p.line) ||
+      !Number.isFinite(Date.parse(p.commenceTime)) || ![null,undefined,'W','L','P','N'].includes(p.result))))
+      throw new Error(`Invalid ${key}; original data left unchanged.`);
+  }
+  if (data.embet_layer_batches != null && !Array.isArray(data.embet_layer_batches)) throw new Error('Invalid batch log');
+  for (const key of ['embet_settings','embet_model_perf']) if (data[key] != null &&
+    (typeof data[key] !== 'object' || Array.isArray(data[key]))) throw new Error(`Invalid ${key}`);
+  for (const m of Object.values(data.embet_model_perf || {})) {
+    if (!m || !Array.isArray(m.picks) || m.picks.some(r => !r || typeof r !== 'object')) throw new Error('Invalid model records');
+  }
+  for (const b of data.embet_layer_batches || []) if (!b || typeof b !== 'object' ||
+    (b.schemaVersion === 4 && (!Array.isArray(b.candidates) || !Number.isFinite(Date.parse(b.requestedAt))))) throw new Error('Invalid research batch');
+  const settings = data.embet_settings || {};
+  for (const [k,lo,hi] of [['minEdge',MIN_EDGE_FLOOR,MIN_EDGE_CEIL],['topN',TOP_N_FLOOR,TOP_N_CEIL],['maxOddsCap',MAX_ODDS_FLOOR,MAX_ODDS_CEIL]]) {
+    if (settings[k] != null && (!Number.isFinite(settings[k]) || settings[k] < lo || settings[k] > hi)) throw new Error(`Invalid setting: ${k}`);
+  }
+  const values = {
+    embet_history:data.embet_history ?? [], embet_pending:data.embet_pending ?? [],
+    embet_settings:data.embet_settings ?? {}, embet_bankroll:data.embet_bankroll ?? null,
+    embet_model_perf:data.embet_model_perf ?? {}, embet_layer_batches:data.embet_layer_batches ?? [],
+    embet_ai_models:data.embet_ai_models ?? DEFAULT_AI_MODELS,
+    embet_schema_v2:false,embet_schema_v3:false,embet_schema_v4:false
+  };
+  if (data.embet_worker_url && /^https:\/\//i.test(data.embet_worker_url)) values.embet_worker_url = data.embet_worker_url;
+  if (!Array.isArray(values.embet_ai_models)) throw new Error('Invalid model selection');
+  const keys = [...new Set([...Object.keys(values),...Object.keys(localStorage).filter(k => k.startsWith('embet_picks_'))])];
+  const old = Object.fromEntries(keys.map(k => [k,localStorage.getItem(k)]));
+  try {
+    // Retain one recoverable pre-import dataset before replacing anything.
+    localStorage.setItem('embet_before_import',JSON.stringify(old));
+    for (const k of keys) {
+      if (k in values) localStorage.setItem(k,JSON.stringify(values[k]));
+      else localStorage.removeItem(k);
+      delete mem[k];
+    }
+  } catch (err) {
+    for (const k of keys) { try { old[k] == null ? localStorage.removeItem(k) : localStorage.setItem(k,old[k]); } catch {} }
+    throw new Error('Browser storage could not save the import. Keep your backup file and free storage before retrying.');
+  }
+}
+
+function migrateSchemaV4() {
+  for (const p of [...st.pending,...st.history]) {
+    if (p.entrySchema !== 4) {
+      if (!p.legacyEntry) p.legacyEntry = {fairProb:p.fairProb,edge:p.edge,edgeEV:p.edgeEV,edgeProb:p.edgeProb,confidence:p.confidence};
+      p.entrySchema = 3; // original entry features cannot be proven immutable
+      if (p.closeSource === 'captured') p.closeSource = 'legacy';
+      if (p.closeSource == null) p.closeSource = p.closingLine == null ? 'none' : 'legacy';
+    }
+    if (Number.isFinite(p.fairProb) && validOdds(p.line)) {
+      p.edgeProb = p.fairProb - iP(p.line); p.edgeEV = cEV(p.fairProb,p.line); p.edge = p.edgeProb;
+    } else { p.edgeProb = null; p.edgeEV = null; p.edge = null; }
+  }
+  persistRecords();
+  LS.set('embet_schema_v4',true);
+}
+
+let closeMaintenanceBusy = false;
+async function maintainCloses() {
+  if (!AK || closeMaintenanceBusy || st.scanning) return;
+  closeMaintenanceBusy = true;
+  try {
+    const now = Date.now();
+    const due = [...st.pending,...st.history].filter(p => p.closingLine == null &&
+      Date.parse(p.commenceTime) > now && Date.parse(p.commenceTime) - now <= 10*60*1000);
+    // Resolve legacy sport labels once, without truncating to discovery's eight sports.
+    let sports = [];
+    if (due.some(p => !p.sportKey)) {
+      const r = await fetch(`${OB}/sports/?all=true&apiKey=${AK}`);
+      if (!r.ok) throw new Error(`Close tracking: sports request ${r.status}`);
+      sports = await r.json();
+    }
+    for (const p of due) if (!p.sportKey) p.sportKey = sports.find(s => s.title === p.sport)?.key;
+    const grouped = new Map();
+    for (const p of due) if (p.sportKey) {
+      if (!grouped.has(p.sportKey)) grouped.set(p.sportKey,new Set());
+      grouped.get(p.sportKey).add(p.gameId);
+    }
+    for (const [sport, ids] of grouped) {
+      const url = new URL(`${OB}/sports/${sport}/odds/`);
+      for (const [k,v] of Object.entries({apiKey:AK,bookmakers:BKS,markets:'h2h,spreads,totals',oddsFormat:'american',eventIds:[...ids].join(',')})) url.searchParams.set(k,v);
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`Close tracking request ${r.status}; will retry while the app is open.`);
+      (await r.json()).forEach(captureClosing);
+    }
+    persistRecords();
+  } catch (e) { st.err = e.message; }
+  finally { finalizeStalePending(); closeMaintenanceBusy = false; render(); }
+}
+
 function maybeAutoBackup() {
   const lastBackupAt = LS.get('embet_last_backup');
   const hasData = st.history.length > 0 || st.pending.length > 0;
@@ -2012,20 +2100,11 @@ function init() {
   if (h) st.history = h;
 
   const pend = LS.get('embet_pending');
-if (pend) {
-  const now = Date.now();
-  const SIXTY_DAYS = 60 * 24 * 60 * 60 * 1000;
-  st.pending = pend.filter(p => {
-    const t = new Date(p.commenceTime).getTime();
-    return (t - now) <= SIXTY_DAYS;
-  });
-  if (st.pending.length !== pend.length) {
-    LS.set('embet_pending', st.pending);
-  }
-}
+if (pend) st.pending = pend;
 
   migrateSchemaV2();
   migrateSchemaV3();
+  migrateSchemaV4();
   // PHASE 0 (2.2): finalizeStalePending() used to run HERE, before scan().
   // captureClosing() only processes picks where closingLine == null, so the
   // fallback locked in an unverifiable value moments before the network call
@@ -2050,11 +2129,13 @@ if (pend) {
   }
 
   if (!AK) {
+    st.offlineHistory = st.history.length > 0 || st.pending.length > 0;
     st.loading = false;
     render();
     return;
   }
 
+  maintainCloses();
   const cached = LS.get(PICKS_KEY());
   if (cached && 'near' in cached) {
     const toArr = v => Array.isArray(v) ? v : (v ? [v] : []);
@@ -2075,6 +2156,8 @@ if (pend) {
 }
 
 init();
+setInterval(() => { if (document.visibilityState === 'visible') maintainCloses(); },60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') maintainCloses(); });
 </script>
 </body>
 </html>
