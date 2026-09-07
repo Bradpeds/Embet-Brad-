@@ -324,9 +324,12 @@ function quantConfidence(o) {
   const depth = m.nBooks != null ? CLAMP((m.nBooks - 2) / 6, 0, 1) : 0.3;
   const agreement = m.disp != null ? CLAMP(1 - (m.disp / 0.04), 0, 1) : 0.5;
   const reference = o.sharp ? (o.pinnacleDeep ? 1.0 : 0.7) : 0.5;
+  // Agreement between two INDEPENDENT de-vigged estimates: the soft-book
+  // consensus and Pinnacle. Neutral (0.5) when there is no sharp reference,
+  // and for pre-fix records that never stored consProb.
   let pinAlign = 0.5;
-  if (m.pinProb != null && o.fairProb != null) {
-    pinAlign = CLAMP(1 - (Math.abs(o.fairProb - m.pinProb) / 0.05), 0, 1);
+  if (m.consProb != null && o.fairProb != null) {
+    pinAlign = CLAMP(1 - (Math.abs(o.fairProb - m.consProb) / 0.05), 0, 1);
   }
   const score = 0.30*reference + 0.30*agreement + 0.25*pinAlign + 0.15*depth;
   return { score: CLAMP(score, 0, 1), depth, agreement, reference, pinAlign };
@@ -978,7 +981,7 @@ function oddsCalibrationCard() {
   </div>`;
 }
 function confidenceCalibrationRows() {
-  const tracked = clvObservations().filter(p => p.entrySchema === 4 && typeof p.confidence === 'number');
+  const tracked = clvObservations().filter(p => p.entrySchema === 4 && p.confVersion === 2 && typeof p.confidence === 'number');
   const tiers = [
     { lo: 0.75, hi: 1.01, label: 'High' },
     { lo: 0.5,  hi: 0.75, label: 'Moderate' },
@@ -1693,9 +1696,9 @@ async function scan() {
             const [fa, fb] = shinProb(iP(a.price), iP(b.price));
             fm = { [oKey(a.name, a.point)]: fa, [oKey(b.name, b.point)]: fb };
             sharpRef = true;
-            for (const key of [oKey(a.name, a.point), oKey(b.name, b.point)]) {
-              const [nm, ptStr] = key.includes('|') ? key.split('|') : [key, null];
-              const ptVal = ptStr != null ? parseFloat(ptStr) : null;
+            const sideKeys = [oKey(a.name, a.point), oKey(b.name, b.point)];
+            const soft = {};
+            for (const key of sideKeys) {
               const ips = [];
               for (const bm of g.bookmakers) {
                 if (bm.key === 'pinnacle') continue;
@@ -1705,7 +1708,21 @@ async function scan() {
               }
               const mean = ips.length ? ips.reduce((s,x)=>s+x,0)/ips.length : null;
               const disp = (ips.length >= 2 && mean != null) ? Math.sqrt(ips.reduce((s,x)=>s+(x-mean)**2,0)/(ips.length-1)) : null;
-              meta[key] = { nBooks: ips.length, disp, pinProb: key === oKey(a.name,a.point) ? iP(a.price) : iP(b.price) };
+              soft[key] = { ips, mean, disp };
+            }
+            // De-vig the soft consensus so it is comparable with the de-vigged
+            // Pinnacle number. Comparing a de-vigged value against a vigged one
+            // just measures the margin, which is what the old pinAlign did.
+            let consProb = {};
+            const mA = soft[sideKeys[0]].mean, mB = soft[sideKeys[1]].mean;
+            if (mA != null && mB != null && mA + mB > 1 && mA > 0 && mB > 0) {
+              const [cA, cB] = shinProb(mA, mB);
+              consProb = { [sideKeys[0]]: cA, [sideKeys[1]]: cB };
+            }
+            for (const key of sideKeys) {
+              meta[key] = { nBooks: soft[key].ips.length, disp: soft[key].disp,
+                            pinProb: key === sideKeys[0] ? iP(a.price) : iP(b.price),
+                            consProb: consProb[key] ?? null };
             }
           } else {
             const pools = {};
@@ -1799,7 +1816,8 @@ async function scan() {
                 sharp:        sharpRef,
                 pinnacleDeep: PINNACLE_DEEP.has(sport),
                 suspicious:   edgeProb > SANITY_EDGE,
-                confMeta:     meta[oppKey] || { nBooks: null, disp: null, pinProb: null },
+                confMeta:     meta[oppKey] || { nBooks: null, disp: null, pinProb: null, consProb: null },
+                confVersion:  2,
                 closingLine:  null,
                 closingAt:    null,
                 closeSource:  'none',
@@ -2192,7 +2210,7 @@ function opportunityRows(rows) {
 function emptyState(title,message,button='Scan markets',fn='rescan') {return `<div class="empty"><strong>${esc(title)}</strong>${esc(message)}<div style="margin-top:14px"><button class="button" onclick="${action(fn)}">${esc(button)}</button></div></div>`;}
 function todayView() {
  const rows=currentOpportunities().filter(p=>Date.parse(p.commenceTime)<=Date.now()+H72 && (maxOddsCap()==null || Math.abs(p.line)<=maxOddsCap())).slice(0,topN());const d=recordSummary();
- return summaryCards()+`<div class="split"><section class="panel"><div class="panel-head"><div><h2>Leading opportunities</h2><p>Next 72 hours · ranked by gap and confidence</p></div><button class="textbutton" onclick="${action('navigate','scanner')}">View scanner →</button></div>${rows.length?opportunityRows(rows):emptyState(st.loading?'Checking the markets…':!st.picks?'Your next scan starts here':'No upcoming opportunities',!AK?'Connect your Odds API key in Settings. Your saved records are available without a connection.':'Scan to find current price disagreements. Existing bets remain in your Tracker.')}</section><aside><section class="panel"><h2>Your workspace</h2><div class="aside-line"><span>Pending records</span><strong>${d.pending}</strong></div><div class="aside-line"><span>Saved history</span><strong>${st.history.length}</strong></div><div class="aside-line"><span>AI connection</span><strong>${getWorkerUrl()?'Configured':'Not set'}</strong></div><button class="textbutton" onclick="${action('navigate','tracker')}">Review tracker →</button></section><section class="panel"><h2>Close capture</h2><p class="quiet">Keep this page open near kickoff. Only timestamped quotes observed within five minutes before the scheduled start qualify as pregame proxies.</p><p class="quiet">Missed or unverified closes do not enter CLV. Your recorded bets and results stay saved.</p><button class="textbutton" onclick="${action('navigate','performance')}">View the evidence →</button></section></aside></div>`;
+ return summaryCards()+`<div class="split"><section class="panel"><div class="panel-head"><div><h2>Leading opportunities</h2><p>Next 72 hours · ranked by gap and confidence</p></div><button class="textbutton" onclick="${action('navigate','scanner')}">View scanner →</button></div>${rows.length?opportunityRows(rows):emptyState(st.loading?'Checking the markets…':!st.picks?'Your next scan starts here':'No upcoming opportunities',!AK?'Connect your Odds API key in Settings. Your saved records are available without a connection.':'Scan to find current price disagreements. Existing bets remain in your Tracker.')}</section><aside><section class="panel"><h2>Your workspace</h2><div class="aside-line"><span>Pending records</span><strong>${d.pending}</strong></div><div class="aside-line"><span>Saved history</span><strong>${st.history.length}</strong></div><div class="aside-line"><span>AI connection</span><strong>${getWorkerUrl()?'Configured':'Not set'}</strong></div><button class="textbutton" onclick="${action('navigate','tracker')}">Review tracker →</button></section><section class="panel"><h2>Close capture</h2><p class="quiet">${window.EmbetSync && localStorage.getItem('embet_sync_url') ? 'Collected automatically by your Worker every few minutes before kickoff, whether or not this page is open. Quotes timestamped within 30 minutes of the scheduled start qualify, and the age of each is recorded.' : 'Not configured. This page collects closes only while it is open near kickoff, and only quotes timestamped within five minutes of the start qualify. Set up Device sync in Settings for automatic collection.'}</p><p class="quiet">Missed or unverified closes never enter CLV. Your recorded bets and results are unaffected either way.</p><button class="textbutton" onclick="${action('navigate','performance')}">View the evidence &rarr;</button></section></aside></div>`;
 }
 function renderRedesign() {
  const app=document.getElementById('app');if(!app)return;
