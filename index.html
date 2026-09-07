@@ -2350,7 +2350,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   /* ------------------------------------------------------------ transport */
   async function api(path, opts = {}) {
     const res = await fetch(syncUrl() + path, {
-      method: opts.body ? 'POST' : 'GET',
+      method: opts.method || (opts.body ? 'POST' : 'GET'),
       headers: { 'authorization': 'Bearer ' + syncSecret(), 'content-type': 'application/json' },
       body: opts.body ? JSON.stringify(opts.body) : undefined
     });
@@ -2624,7 +2624,66 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
         </div>
         <p class="quiet">The secret is stored in this browser only and is never written into
         backup files. Enter it once per device.</p>
+      </section>` + gradesPanel();
+  };
+
+  /* ------------------------------------------------ 3b. model record panel */
+  // Results used to arrive only by hand, which meant the 40 picks that were
+  // never wagered could not be scored at all — the model's own record was
+  // unmeasurable. The Worker now grades every finished pick from the final
+  // score and keeps that grade separate from the wager ledger.
+  const pct = v => (v == null ? '—' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%');
+  const line = (label, r) => !r || !r.picks ? '' : `
+    <tr><td>${esc(label)}</td><td>${r.picks}</td>
+        <td>${r.W}-${r.L}${r.P ? '-' + r.P : ''}</td>
+        <td>${r.netUnits > 0 ? '+' : ''}${r.netUnits.toFixed(2)}u</td>
+        <td>${pct(r.roi)}</td></tr>`;
+
+  function gradesPanel() {
+    if (!syncOn()) return '';
+    const g = S.grades;
+    if (g === undefined) { setTimeout(loadGrades, 0); return ''; }
+    if (g === null) return '';
+    const p = g.performance || {};
+    const errs = Object.entries(g.gradeErrors || {});
+    return `
+      <section class="panel">
+        <h2>Model record</h2>
+        <p class="quiet">Graded from final scores, not from what was bet. Flat one unit per pick,
+        settled at the price on the ticket. Win rate is shown but is not the measure — most of
+        these are underdogs, where losing most of the time is still profitable.</p>
+        <table class="tbl"><thead><tr>
+          <th>Set</th><th>Picks</th><th>W-L</th><th>Net</th><th>ROI</th>
+        </tr></thead><tbody>
+          ${line('Every graded pick', p.allRows)}
+          ${line('Distinct picks (deduped across books)', p.distinctPicks)}
+          ${line('Only the ones you bet', p.wageredOnly)}
+        </tbody></table>
+        <p class="quiet" style="margin-top:10px">
+          ${g.awaitingGrade} finished ${g.awaitingGrade === 1 ? 'pick' : 'picks'} awaiting a score
+          ${errs.length ? '· ' + errs.map(([k, n]) => `${n} ${esc(k)}`).join(' · ') : ''}
+          ${g.disagreements?.length
+            ? `<br><b>${g.disagreements.length} of your entered results disagree with the final score.</b>
+               Nothing was changed — check them.`
+            : ''}
+        </p>
+        <div class="record-actions">
+          <button class="button" onclick="EmbetSync.grade()">Grade now</button>
+        </div>
       </section>`;
+  }
+
+  async function loadGrades() {
+    try { S.grades = await api('/api/grades'); }
+    catch { S.grades = null; }          // never let a reporting panel break settings
+    render();
+  }
+  S.grade = async () => {
+    try {
+      await api('/api/grade/run?force=1', { method: 'POST' });
+      S.grades = undefined;
+      await loadGrades();
+    } catch (e) { window.alert('Grading failed: ' + e.message); }
   };
 
   S.setUrl = v => { LS.set(SYNC_URL, String(v || '').trim().replace(/\/+$/, '')); render(); };
@@ -2675,12 +2734,25 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
     // gets seeded from this browser rather than emptying it.
     setTimeout(() => syncNow({ full: !LS.get(SYNC_REV), silent: true }), 400);
     setInterval(() => { if (document.visibilityState === 'visible') syncNow({ silent: true }); }, 5 * 60 * 1000);
+
+    // Belt and braces. The Worker's cron is registered and currently fires
+    // nothing, which would mean no closes are captured at all. Poking the same
+    // job from an open page is strictly worse than a cron — it only runs when a
+    // device is awake — but it is far better than nothing, and it runs the
+    // server-side capture rules rather than the weaker in-page ones. Harmless
+    // once the cron works: the job is idempotent and short-circuits when
+    // nothing is inside the lookahead window.
+    const poke = () => {
+      if (document.visibilityState !== 'visible') return;
+      api('/api/cron/run', { method: 'POST' }).catch(() => {});
+    };
+    setTimeout(poke, 4000);
+    setInterval(poke, 5 * 60 * 1000);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') syncNow({ silent: true });
     });
   }
 })();
-
 </script>
 </body>
 </html>
