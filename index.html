@@ -2266,5 +2266,320 @@ init();
 setInterval(() => { if (document.visibilityState === 'visible') maintainCloses(); },60000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') maintainCloses(); });
 </script>
+<script>
+/* =========================================================================
+ * emBET Phase 1 — client sync module
+ *
+ * Drop-in. Paste this whole block as a new <script> immediately BEFORE the
+ * closing </body> tag, after the existing app script. It touches the existing
+ * code in four places, all by reassigning top-level function bindings — no
+ * edits to the app's own source are required.
+ *
+ *   1. isCapturedClose()  — also accept server evidence (observed-pregame-v2,
+ *                           wider window). v1 records keep their v1 rules.
+ *   2. persistRecords()   — mark changed records dirty and schedule a push.
+ *   3. settingsView()     — append a Sync panel.
+ *   4. init()             — already ran; we pull once on load and re-render.
+ *
+ * Design rules (build plan §5), enforced here as well as on the server:
+ *   - never delete a local record because the server did not return it
+ *   - first sync pushes local state before trusting server state
+ *   - a server-captured close outranks anything this browser produced
+ *   - entry fields are never sent as edits; the server ignores them anyway
+ * ========================================================================= */
+(function () {
+  'use strict';
+
+  const SYNC_URL    = 'embet_sync_url';
+  const SYNC_SECRET = 'embet_sync_secret';
+  const SYNC_REV    = 'embet_sync_rev';
+  const SYNC_SIGS   = 'embet_sync_sigs';
+  const SYNC_PROXY  = 'embet_sync_proxy_odds';
+
+  const syncUrl    = () => (LS.get(SYNC_URL) || '').replace(/\/+$/, '');
+  const syncSecret = () => LS.get(SYNC_SECRET) || '';
+  const syncOn     = () => !!(syncUrl() && syncSecret());
+
+  const S = { busy: false, last: null, err: null, pulled: 0, pushed: 0, serverEmpty: null };
+  window.EmbetSync = S;
+
+  /* ---------------------------------------------------------------- dirty */
+  // persistRecords() cannot tell us what changed, so we diff a cheap
+  // signature per record. Entry fields are excluded deliberately: they are
+  // immutable, so a change there is a bug, not something to replicate.
+  const sig = p => [
+    p.result ?? '', p.settledAt ?? '', p.closingLine ?? '', p.closeSource ?? '',
+    p.closingAt ?? '', p.latestLine ?? '', p.latestLineAt ?? '',
+    p.preClose?.quoteAt ?? '', p.deleted ? 1 : 0
+  ].join('|');
+
+  function dirtyIds() {
+    const prev = LS.get(SYNC_SIGS) || {};
+    const out = [];
+    for (const p of [...st.pending, ...st.history]) {
+      if (!p || !p.id) continue;
+      if (prev[p.id] !== sig(p)) out.push(p.id);
+    }
+    return out;
+  }
+  function commitSigs() {
+    const map = {};
+    for (const p of [...st.pending, ...st.history]) if (p && p.id) map[p.id] = sig(p);
+    LS.set(SYNC_SIGS, map);
+  }
+
+  /* ------------------------------------------------------------ transport */
+  async function api(path, opts = {}) {
+    const res = await fetch(syncUrl() + path, {
+      method: opts.body ? 'POST' : 'GET',
+      headers: { 'authorization': 'Bearer ' + syncSecret(), 'content-type': 'application/json' },
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Sync ${res.status}`);
+    return data;
+  }
+
+  /* ------------------------------------------------------------- adapters */
+  const OUT_DROP = new Set(['_sig']);
+  function outbound(p) {
+    const o = {};
+    for (const k in p) if (!OUT_DROP.has(k)) o[k] = p[k];
+    o.updatedAt = new Date().toISOString();
+    return o;
+  }
+
+  // Server rows arrive already in client shape (the Worker's toClient()).
+  // The one thing we must not do is trust a server row's `result` over a
+  // local settle that has not been pushed yet — but /api/sync applies our
+  // push before computing the response, so anything we get back already
+  // reflects it.
+  function applyServerRecords(rows) {
+    if (!rows?.length) return 0;
+    const byId = new Map();
+    for (const p of st.pending) byId.set(p.id, { list: 'pending', rec: p });
+    for (const p of st.history) byId.set(p.id, { list: 'history', rec: p });
+
+    let n = 0;
+    for (const row of rows) {
+      if (row.deleted) continue;                  // soft deletes: leave local alone
+      const hit = byId.get(row.id);
+      const belongs = row.result ? 'history' : 'pending';
+      if (!hit) {
+        (belongs === 'history' ? st.history : st.pending).push(row);
+        n++;
+        continue;
+      }
+      // merge in place so object identity survives for anything holding a ref
+      Object.assign(hit.rec, row);
+      if (hit.list !== belongs) {
+        if (belongs === 'history') {
+          st.pending = st.pending.filter(x => x.id !== row.id);
+          if (!st.history.some(x => x.id === row.id)) st.history.push(hit.rec);
+        } else {
+          st.history = st.history.filter(x => x.id !== row.id);
+          if (!st.pending.some(x => x.id === row.id)) st.pending.push(hit.rec);
+        }
+      }
+      n++;
+    }
+    return n;
+  }
+
+  function localModelPicks() {
+    const perf = LS.get('embet_model_perf') || {};
+    const out = [];
+    for (const [modelId, d] of Object.entries(perf))
+      for (const p of (d.picks || []))
+        out.push({ modelId, pickId: p.pickId, modelName: d.modelName, date: p.date,
+                   confidence: p.confidence, clv_pp: p.clv_pp,
+                   clvLocked: !!p.clvLocked, legacy: !!p.legacy });
+    return out;
+  }
+
+  /* ------------------------------------------------------------ the cycle */
+  async function syncNow({ full = false, silent = false } = {}) {
+    if (!syncOn() || S.busy) return;
+    S.busy = true; S.err = null;
+    try {
+      const since = full ? 0 : (LS.get(SYNC_REV) || 0);
+      const ids = new Set(full ? null : dirtyIds());
+      const all = [...st.pending, ...st.history];
+      const push = full ? all : all.filter(p => ids.has(p.id));
+
+      // Settings are pushed only once this device has synced at least once.
+      // A fresh device holds defaults, and pushing them on the first sync
+      // overwrites the real settings already on the server -- the mirror
+      // image of the never-wipe-local rule.
+      const firstSync = !LS.get(SYNC_REV);
+      const body = {
+        since,
+        records: push.map(outbound),
+        ...(firstSync ? {} : {
+          settings: {
+            ...(LS.get('embet_settings') || {}),
+            bankroll: LS.get('embet_bankroll') ?? null
+          }
+        }),
+        layerBatches: LS.get('embet_layer_batches') || [],
+        modelPicks: localModelPicks()
+      };
+
+      const res = await api('/api/sync', { body });
+      S.serverEmpty = res.serverEmptyBefore ?? res.serverEmpty;
+      S.pushed = push.length;
+      S.pulled = applyServerRecords(res.records);
+
+      // settings: server is truth once it holds any
+      if (res.settings && Object.keys(res.settings).length) {
+        const next = { ...res.settings };
+        if (next.bankroll != null) { st.bankroll = next.bankroll; LS.set('embet_bankroll', next.bankroll); }
+        delete next.bankroll;
+        if (Object.keys(next).length) { st.settings = { ...st.settings, ...next }; LS.set('embet_settings', st.settings); }
+      }
+      if (res.layerBatches?.length) {
+        const log = LS.get('embet_layer_batches') || [];
+        const have = new Set(log.map(b => b.batchKey));
+        let added = false;
+        for (const b of res.layerBatches) if (!have.has(b.batchKey)) { log.push(b); added = true; }
+        if (added) LS.set('embet_layer_batches', log);
+      }
+
+      persistRecordsRaw();
+      commitSigs();
+      LS.set(SYNC_REV, res.rev);
+      S.last = new Date().toISOString();
+    } catch (e) {
+      S.err = e.message || String(e);
+      if (!silent) st.err = `Sync: ${S.err}`;
+    } finally {
+      S.busy = false;
+      render();
+    }
+  }
+  S.syncNow = syncNow;
+
+  /* -------------------------------------------------- 1. evidence version */
+  // The Worker records `observed-pregame-v2` with a 30-minute window and an
+  // ageMs field. The shipped client only accepts `observed-pregame-v1` inside
+  // 5 minutes, so without this every server-captured close would be discarded
+  // by the very validator that is supposed to protect the dataset.
+  // v1 records keep the original 5-minute rule; nothing already verified changes.
+  const V1_WINDOW = 5 * 60 * 1000;
+  const V2_WINDOW = 30 * 60 * 1000;
+  const _isCapturedClose = isCapturedClose;
+  isCapturedClose = function (p) {
+    const e = p?.closeEvidence;
+    if (e?.method !== 'observed-pregame-v2') return _isCapturedClose(p);
+    const start = Date.parse(p?.commenceTime);
+    const quote = Date.parse(e.quoteAt), observed = Date.parse(e.observedAt);
+    return p.closeSource === 'captured' &&
+      validOdds(p.line) && validOdds(p.closingLine) && p.closingLine === e.price &&
+      Number.isFinite(start) && Number.isFinite(quote) && Number.isFinite(observed) &&
+      quote <= observed && quote < start && start - quote <= V2_WINDOW &&
+      Date.now() >= start && e.gameId === p.gameId && e.mkt === p.mkt &&
+      e.bet === p.bet && e.book === p.book;
+  };
+  S.windows = { v1: V1_WINDOW, v2: V2_WINDOW };
+
+  /* ------------------------------------------------- 2. persist -> push */
+  const persistRecordsRaw = persistRecords;
+  let pushTimer = null;
+  persistRecords = function () {
+    persistRecordsRaw();
+    if (!syncOn()) return;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(() => syncNow({ silent: true }), 1500);
+  };
+
+  /* ------------------------------------------------ 3. settings UI panel */
+  const _settingsView = settingsView;
+  settingsView = function () {
+    const on = syncOn();
+    const state = !on ? 'Not configured'
+      : S.busy ? 'Syncing…'
+      : S.err ? `Error: ${esc(S.err)}`
+      : S.last ? `Last sync ${esc(fDT(S.last))} · pushed ${S.pushed}, pulled ${S.pulled}`
+      : 'Configured, not yet synced';
+    return _settingsView() + `
+      <section class="panel">
+        <h2>Device sync</h2>
+        <p class="quiet">Shares one dataset between this browser and your phone, and lets the
+        Worker capture closing lines while no browser is open. Records still live in this
+        browser as a cache, so backups keep working exactly as before.</p>
+        <label class="field">Sync Worker URL
+          <input type="url" value="${attribute(syncUrl())}"
+                 placeholder="https://embet-data.you.workers.dev"
+                 onchange="EmbetSync.setUrl(this.value)"></label>
+        <label class="field" style="margin-top:14px">Sync secret
+          <input type="password" autocomplete="off" placeholder="EMBET_SYNC_SECRET"
+                 onchange="EmbetSync.setSecret(this.value)"></label>
+        <p class="quiet" style="margin-top:12px">${state}</p>
+        <div class="record-actions">
+          <button class="button primary" ${on ? '' : 'disabled'}
+                  onclick="EmbetSync.syncNow({full:true})">Sync now</button>
+          <button class="button" ${on ? '' : 'disabled'}
+                  onclick="EmbetSync.check()">Check server</button>
+        </div>
+        <p class="quiet">The secret is stored in this browser only and is never written into
+        backup files. Enter it once per device.</p>
+      </section>`;
+  };
+
+  S.setUrl = v => { LS.set(SYNC_URL, String(v || '').trim().replace(/\/+$/, '')); render(); };
+  S.setSecret = v => { LS.set(SYNC_SECRET, String(v || '').trim()); render(); };
+  S.check = async () => {
+    try {
+      const h = await api('/api/health');
+      st.err = '';
+      window.alert(
+        `Server OK\n\n` +
+        `records: ${h.records}\n` +
+        `results: ${JSON.stringify(h.byResult)}\n` +
+        `closes: ${JSON.stringify(h.closeSource)}\n` +
+        `odds requests today: ${h.oddsUsageToday?.requests ?? 0} / ${h.dailyCap}\n` +
+        `last cron: ${h.lastCron ? h.lastCron.ran_at : 'never'}`
+      );
+    } catch (e) { window.alert('Server check failed: ' + e.message); }
+  };
+
+  /* ------------------------------------- 4. optional: route odds via Worker */
+  // Off by default. When enabled, Odds API calls are rewritten to the Worker so
+  // the key leaves this file. Turn it on only after sync is proven, because it
+  // changes how scanning fetches.
+  if (LS.get(SYNC_PROXY) && syncOn()) {
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      const url = typeof input === 'string' ? input : input?.url;
+      if (url && url.startsWith('https://api.the-odds-api.com/v4')) {
+        const u = new URL(url);
+        const target = new URL(syncUrl() +
+          (u.pathname.includes('/odds/') ? '/api/odds/events' : '/api/odds/sports'));
+        if (u.pathname.includes('/odds/')) {
+          target.searchParams.set('sport', u.pathname.split('/sports/')[1].split('/')[0]);
+          for (const k of ['markets', 'eventIds', 'bookmakers'])
+            if (u.searchParams.get(k)) target.searchParams.set(k, u.searchParams.get(k));
+        } else if (u.searchParams.get('all')) target.searchParams.set('all', 'true');
+        return nativeFetch(target.toString(), {
+          headers: { authorization: 'Bearer ' + syncSecret() }
+        });
+      }
+      return nativeFetch(input, init);
+    };
+  }
+
+  /* ----------------------------------------------------------- first pull */
+  if (syncOn()) {
+    // Pull-then-merge on load. A full push goes with it, so an empty server
+    // gets seeded from this browser rather than emptying it.
+    setTimeout(() => syncNow({ full: !LS.get(SYNC_REV), silent: true }), 400);
+    setInterval(() => { if (document.visibilityState === 'visible') syncNow({ silent: true }); }, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') syncNow({ silent: true });
+    });
+  }
+})();
+
+</script>
 </body>
 </html>
