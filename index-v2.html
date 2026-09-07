@@ -1,0 +1,2789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>emBET · Market workspace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f7f8fc;
+      --surface: #ffffff;
+      --border: rgba(0,0,0,0.09);
+      --border-md: rgba(0,0,0,0.15);
+      --text: #111827;
+      --text2: #6b7280;
+      --text3: #9ca3af;
+      --accent: #3b5bdb;
+      --accent-bg: #eef2ff;
+      --accent-border: rgba(59,91,219,0.25);
+      --green: #16a34a;
+      --green-bg: #f0fdf4;
+      --green-border: rgba(22,163,74,0.25);
+      --red: #dc2626;
+      --red-bg: #fef2f2;
+      --red-border: rgba(220,38,38,0.25);
+      --amber: #d97706;
+      --amber-bg: #fffbeb;
+      --amber-border: rgba(217,119,6,0.25);
+      --mono: 'JetBrains Mono', 'Courier New', monospace;
+      --sans: 'Inter', system-ui, sans-serif;
+      --radius: 8px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0c0e18;
+        --surface: #151824;
+        --border: rgba(255,255,255,0.07);
+        --border-md: rgba(255,255,255,0.13);
+        --text: #e8ecff;
+        --text2: #8891b2;
+        --text3: #5d6585;
+        --accent: #6c8cff;
+        --accent-bg: rgba(108,140,255,0.1);
+        --accent-border: rgba(108,140,255,0.3);
+        --green: #4ade80;
+        --green-bg: rgba(74,222,128,0.08);
+        --green-border: rgba(74,222,128,0.25);
+        --red: #f87171;
+        --red-bg: rgba(248,113,113,0.08);
+        --red-border: rgba(248,113,113,0.25);
+        --amber: #fbbf24;
+        --amber-bg: rgba(251,191,36,0.08);
+        --amber-border: rgba(251,191,36,0.25);
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 620px; margin: 0 auto; padding: 28px 16px 64px; }
+    .card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      margin-bottom: 12px;
+    }
+    .near-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 0;
+      padding: 20px 22px;
+      margin-bottom: 12px;
+    }
+    .future-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-left: 3px solid var(--amber);
+      border-radius: 0;
+      padding: 20px 22px;
+      margin-bottom: 12px;
+    }
+    .section-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 20px 0 14px;
+      font-size: 11px;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: var(--text3);
+    }
+    .section-divider::before,
+    .section-divider::after {
+      content: '';
+      flex: 1;
+      height: 0.5px;
+      background: var(--border);
+    }
+    .lbl {
+      font-size: 10px;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: var(--text2);
+      display: block;
+      margin-bottom: 4px;
+    }
+    .mono { font-family: var(--mono); }
+    .btn {
+      background: transparent;
+      border: 0.5px solid var(--border-md);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 6px 13px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: var(--sans);
+      transition: background 0.1s;
+    }
+    .btn:hover { background: var(--accent-bg); }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .b-neutral { background: var(--bg);       color: var(--text2);  border: 0.5px solid var(--border-md);      }
+    .b-info    { background: var(--accent-bg); color: var(--accent); border: 0.5px solid var(--accent-border);  }
+    .b-success { background: var(--green-bg);  color: var(--green);  border: 0.5px solid var(--green-border);   }
+    .b-danger  { background: var(--red-bg);    color: var(--red);    border: 0.5px solid var(--red-border);     }
+    .b-warning { background: var(--amber-bg);  color: var(--amber);  border: 0.5px solid var(--amber-border);   }
+    .rbtn {
+      flex: 1;
+      padding: 12px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      border: 0.5px solid var(--border-md);
+      background: var(--bg);
+      color: var(--text2);
+      font-family: var(--sans);
+    }
+    .rbtn.W { background: var(--green-bg);  color: var(--green);  border-color: var(--green-border);  font-weight: 500; }
+    .rbtn.L { background: var(--red-bg);    color: var(--red);    border-color: var(--red-border);    font-weight: 500; }
+    .rbtn.P { background: var(--amber-bg);  color: var(--amber);  border-color: var(--amber-border);  font-weight: 500; }
+    .rbtn.N { background: var(--border);    color: var(--text);   border-color: var(--border-md);      font-weight: 500; }
+    .tbl { width: 100%; border-collapse: collapse; }
+    .tbl td { padding: 8px 14px; border-bottom: 0.5px solid var(--border); vertical-align: middle; }
+    .ai-card {
+      background: var(--surface);
+      border: 0.5px solid var(--accent-border);
+      border-left: 3px solid var(--accent);
+      border-radius: 0;
+      padding: 18px 20px;
+      margin-bottom: 12px;
+    }
+    .ai-pick-row {
+      background: var(--bg);
+      border: 0.5px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .empty-window {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: var(--text2);
+    }
+  :root{--bg:#f4f5f0;--surface:#fff;--text:#182e29;--text2:#52665f;--text3:#63756e;--accent:#087c58;--accent-bg:#e6f3ec;--accent-border:#bcddcc;--green:#087c58;--border:#dce3db;--border-md:#bccbc1;--sans:Inter,system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:var(--sans);font-size:16px;color:var(--text)}body>div:not(#app){display:none}#app{max-width:none;padding:0;margin:0}button,input,select{font:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:.65}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #e7ad35;outline-offset:3px}.skip{position:fixed;top:-80px;left:12px;z-index:100}.skip:focus{top:12px;background:white;padding:12px}.shell{min-height:100vh;padding-left:224px}.rail{position:fixed;inset:0 auto 0 0;width:224px;background:#143c32;color:#d9e8de;padding:32px 20px;display:flex;flex-direction:column;gap:34px;z-index:10}.brand{font-size:29px;font-weight:600;letter-spacing:-1.5px;color:white}.brand small{display:block;font-size:12px;letter-spacing:2px;font-weight:400;margin-top:10px;color:#adc9bb;text-transform:uppercase}.nav{display:flex;flex-direction:column;gap:7px}.nav button{text-align:left;border:0;color:#cbded3;background:transparent;padding:13px 14px;border-radius:7px;font-size:14px;min-height:44px}.nav button[aria-current=page]{background:#2b5747;color:#fff;font-weight:600}.nav button:hover{background:#254d40}.rail-foot{margin-top:auto;border-top:1px solid #446456;padding-top:20px;font-size:13px;line-height:1.7;color:#b8cfc1}.rail-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#8adaad;margin-right:8px}.workspace{max-width:1440px;padding:34px 42px 70px;margin:auto}.topbar{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:30px}.eyebrow{font-size:12px;letter-spacing:1.6px;text-transform:uppercase;color:#617568;margin-bottom:9px}.topbar h1{font-size:32px;line-height:1.2;margin:0;font-weight:500;letter-spacing:-1px}.sub{color:var(--text2);font-size:14px;line-height:1.6;margin:9px 0 0}.button{display:inline-flex;justify-content:center;align-items:center;gap:8px;padding:11px 16px;min-height:44px;border:1px solid #cbd7cd;border-radius:6px;background:#fff;color:var(--text);font-size:14px;font-weight:500;text-decoration:none}.primary{background:#087c58;color:white;border-color:#087c58}.textbutton{background:none;border:0;padding:8px 0;color:#087c58;font-size:14px;min-height:44px}.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:26px}.stat{padding:22px 24px;background:white;border:1px solid var(--border);border-radius:9px}.stat .value{font-size:32px;letter-spacing:-1px;font-variant-numeric:tabular-nums;font-weight:500;margin:12px 0 5px}.stat .label{font-size:13px;color:var(--text2)}.stat small{font-size:12px;color:var(--text2)}.split{display:grid;grid-template-columns:minmax(0,1.9fr) minmax(260px,1fr);gap:24px}.panel{background:#fff;border:1px solid var(--border);border-radius:9px;padding:24px;margin-bottom:20px;min-width:0}.panel h2{font-size:18px;font-weight:500;letter-spacing:-.3px;margin:0}.panel h3{font-size:16px;font-weight:500;margin:0 0 10px}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:18px}.panel-head p{font-size:13px;color:var(--text2);margin:6px 0 0}.empty{padding:30px 6px;color:var(--text2);line-height:1.7}.empty strong{display:block;color:var(--text);font-size:18px;font-weight:500;margin-bottom:8px}.quiet{font-size:13px;line-height:1.7;color:var(--text2)}.notice{padding:14px 18px;background:#fbf4e4;border:1px solid #e9d9b6;border-radius:7px;color:#685427;font-size:14px;line-height:1.6;margin-bottom:22px}.error{background:#fff0ed;color:#8a2920;border-color:#e3b6ad}.opportunity{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:14px;padding:19px 0;border-top:1px solid #e7ebe4}.rank{font-family:var(--mono);font-size:12px;color:#829489}.opportunity h3{font-size:16px;line-height:1.45;margin:0 0 5px}.opportunity p{font-size:13px;line-height:1.5;margin:0;color:var(--text2)}.number{font-variant-numeric:tabular-nums}.gap{font-size:21px;color:#087c58;white-space:nowrap;letter-spacing:-.6px}.tag{display:inline-block;font-size:12px;padding:4px 7px;border-radius:4px;background:#edf3ed;color:#45634f;margin:5px 4px 0 0}.aside-line{display:flex;justify-content:space-between;gap:12px;padding:15px 0;border-bottom:1px solid #e5ebe3;font-size:14px}.tools{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:18px}.field{display:flex;flex-direction:column;gap:7px;flex:1;min-width:150px;font-size:13px;color:var(--text2)}.field input,.field select{width:100%;padding:10px 12px;background:#fff;border:1px solid #cbd7cd;border-radius:6px;min-height:44px;color:var(--text);font-size:14px}.pillbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}.pillbar button{padding:9px 13px;min-height:44px;background:white;border:1px solid var(--border);border-radius:6px;font-size:14px}.pillbar button[aria-pressed=true]{background:#143c32;color:white;border-color:#143c32}.record{padding:18px 0;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr auto;gap:16px}.record strong{font-size:16px;font-weight:500}.record p{font-size:13px;color:var(--text2);margin:7px 0;line-height:1.5}.record-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.detail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:20px 0}.detail-grid>div{padding:16px;background:#f4f6f1;border-radius:6px}.detail-grid strong{display:block;font-size:24px;font-weight:500;margin-top:8px}.detail-grid small{color:var(--text2);font-size:13px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.btn{min-height:40px;font-size:14px}.tbl{font-size:14px}.ai-card,.card{border-color:var(--border);box-shadow:none}.section-divider{font-size:14px}.positive{color:#087c58}.negative{color:#a73e32}.section-note{padding:16px 0;color:var(--text2);font-size:13px;line-height:1.6}.checkboxline{display:flex;gap:10px;align-items:center;font-size:14px;margin:12px 0}.full{grid-column:1/-1}.back{margin-bottom:15px}.badge{font-size:12px!important}.mono{font-variant-numeric:tabular-nums}.settlement{max-width:480px;margin:auto}
+@media(max-width:1050px){.workspace{padding:26px}.split{grid-template-columns:1fr}.rail{width:194px}.shell{padding-left:194px}.stats{gap:10px}.stat{padding:18px}}
+@media(max-width:700px){.shell{padding-left:0}.rail{position:sticky;top:0;width:100%;padding:14px 16px 8px;gap:12px}.brand{font-size:23px}.brand small,.rail-foot{display:none}.nav{flex-direction:row;overflow-x:auto;gap:3px;padding-bottom:3px}.nav button{white-space:nowrap;padding:10px 12px;font-size:13px;flex-shrink:0}.workspace{padding:24px 16px 60px}.topbar{align-items:flex-start;gap:12px;margin-bottom:22px}.topbar h1{font-size:27px}.topbar .button{padding:10px 12px}.stats{grid-template-columns:1fr 1fr}.stats .stat:last-child{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px}.stat .value{font-size:27px}.panel{padding:18px}.detail-grid{grid-template-columns:1fr 1fr}.form-grid{grid-template-columns:1fr}.opportunity{grid-template-columns:22px 1fr auto;gap:8px}.opportunity h3{font-size:15px}.record{grid-template-columns:1fr}.gap{font-size:18px}.field{min-width:130px}}
+
+.topbar>.button{white-space:nowrap;flex-shrink:0}.calibration-table{width:100%;border-collapse:collapse;font-size:14px}.calibration-table th,.calibration-table td{padding:12px 6px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}.calibration-table th:first-child{text-align:left;font-weight:400}.calibration-table thead th{font-size:12px;color:var(--text2);font-weight:500}.workspace .ai-card div,.workspace .ai-card p{font-size:14px!important;line-height:1.6!important}.workspace .ai-card .badge{font-size:12px!important}
+
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+let AK    = '';   // loaded from localStorage on init
+const OB  = 'https://api.the-odds-api.com/v4';
+const BKS = 'pinnacle,draftkings,fanduel,betmgm,caesars,pointsbetus,betrivers,williamhill_us';
+const START  = 'June 17, 2026';
+const FLAT   = 10;
+const H72    = 72  * 60 * 60 * 1000;
+const HFAR   = 14  * 24 * 60 * 60 * 1000;
+const STALE_MS = 4 * 60 * 60 * 1000;
+const MIN_CB = 3;
+const DEFAULT_MIN_EDGE   = 0.015;
+const DEFAULT_TOP_N      = 3;
+const MIN_EDGE_FLOOR = 0.005, MIN_EDGE_CEIL = 0.05;
+const TOP_N_FLOOR = 1, TOP_N_CEIL = 20;
+// Optional personal risk cap: hides plays beyond a max |odds| the person
+// chooses. Off by default (null = unlimited) -- nothing changes for anyone
+// who doesn't touch this. Long-shot mispricings are the ones sportsbooks are
+// laziest about repricing, which cuts both ways: more likely to be stale
+// data, but also sometimes where genuine value hides. Rather than bake a
+// hard cutoff into the core edge/confidence math, this is a display filter
+// the person opts into -- the underlying scan still detects everything, and
+// the odds-band calibration table keeps collecting real evidence on the far
+// end regardless of whether it's currently hidden from view.
+const MAX_ODDS_FLOOR = 200, MAX_ODDS_CEIL = 3000;
+const maxOddsCap = () => st.settings?.maxOddsCap ?? null;
+// PHASE 0 (2.4): `edge` is now a probability gap (percentage points), not an
+// EV fraction, so the sanity cap has to be restated in the new unit. The old
+// 0.20 meant "20% expected value", which at +300 was only a 5pp price
+// disagreement; as a probability gap, 0.20 would be so loose it would never
+// fire. A 10pp gap between a sharp reference and a soft book essentially never
+// occurs for real -- above that it is a data artifact, not a play.
+const SANITY_EDGE = 0.10;
+const MIN_SCORED = 10;
+// Cached scan blobs are keyed by schema version: pre-patch blobs hold `edge`
+// in EV units and would render as probability points if reused.
+const PICKS_KEY = () => 'embet_picks_v4_' + today();
+// Wait this long past kickoff before writing an unverifiable fallback close,
+// so captureClosing() gets real chances at the market first.
+const FINALIZE_GRACE_MS = 24 * 60 * 60 * 1000;
+// Rough paired-sample target before the Layer 1 vs Layer 2 difference means
+// anything. Instrumentation now; a readable answer is months away.
+const LAYER_TARGET_BATCHES = 150;
+const KELLY_FRACTION = 0.25;
+const SAMPLE_EARLY       = 30;
+const SAMPLE_DEVELOPING  = 100;
+const SAMPLE_MEANINGFUL  = 250;
+const CLAMP = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const minEdge = () => st.settings?.minEdge ?? DEFAULT_MIN_EDGE;
+const topN    = () => st.settings?.topN    ?? DEFAULT_TOP_N;
+const AI_FINALISTS = 4;
+const DEFAULT_AI_MODELS = ['claude','gpt4o','gemini','deepseek'];
+const MODELS = {
+  claude:   { id:'claude',   name:'Claude',   provider:'anthropic', model:'claude-sonnet-4-6',          hasSearch:true  },
+  gpt4o:    { id:'gpt4o',    name:'GPT-4o',   provider:'openai',    model:'gpt-4o',                     hasSearch:false },
+  gemini:   { id:'gemini',   name:'Gemini',   provider:'google',    model:'gemini-2.5-flash',           hasSearch:false },
+  deepseek: { id:'deepseek', name:'DeepSeek', provider:'deepseek',  model:'deepseek-chat',              hasSearch:false }
+};
+const getWorkerUrl = () => LS.get('embet_worker_url') || '';
+const getAiModels  = () => LS.get('embet_ai_models') || DEFAULT_AI_MODELS;
+const PRI = [
+  'baseball_mlb','basketball_nba','icehockey_nhl',
+  'americanfootball_nfl','americanfootball_ncaaf',
+  'basketball_ncaab','basketball_wnba',
+  'soccer_usa_mls','soccer_epl'
+];
+const PINNACLE_DEEP = new Set([
+  'baseball_mlb','basketball_nba','icehockey_nhl','americanfootball_nfl','soccer_epl'
+]);
+const tD  = o => o > 0 ? o/100+1 : 100/Math.abs(o)+1;
+const iP  = o => 1/tD(o);
+const tA  = d => d >= 2 ? Math.round((d-1)*100) : Math.round(-100/(d-1));
+const cEV = (f,o) => f*(tD(o)-1)-(1-f);
+const cCLV = (yourLine, closeLine) => iP(closeLine) - iP(yourLine);
+function kellyStake(fairProb, americanOdds, bankroll) {
+  if (!bankroll || bankroll <= 0) return null;
+  const b = tD(americanOdds) - 1;
+  const fStar = fairProb - (1 - fairProb) / b;
+  return bankroll * Math.max(0, fStar) * KELLY_FRACTION;
+}
+function stdev(arr, mean) {
+  if (arr.length < 2) return null;
+  const v = arr.reduce((s, x) => s + (x - mean) ** 2, 0) / (arr.length - 1);
+  return Math.sqrt(v);
+}
+function eventClusterSE(rows, mean) {
+  if (mean == null || rows.length < 2) return null;
+  const sums = new Map();
+  for (const p of rows) {
+    const k = p.gameId || p.game;
+    sums.set(k,(sums.get(k) || 0) + cCLV(p.line,p.closingLine) - mean);
+  }
+  const g = sums.size;
+  // Normal approximation only displayed with at least 30 event clusters.
+  if (g < 30) return null;
+  return Math.sqrt(g/(g-1) * [...sums.values()].reduce((a,x)=>a+x*x,0) / rows.length**2);
+}
+function sampleNote(n) {
+  return n ? `${n} unique wagers with observed pregame proxies. This measures same-book implied-probability movement, including changes in margin. Intervals require at least 30 event clusters; positive CLV alone does not establish profitability.` : 'No eligible pregame closes yet. Saved bet results remain in your history.';
+}
+function shinProb(q1, q2) {
+  const Q = q1 + q2;
+  const pAt = (z, qi) => z >= 1
+    ? (qi*qi) / Q
+    : (Math.sqrt(z*z + 4*(1-z)*qi*qi/Q) - z) / (2*(1-z));
+  const f = z => pAt(z, q1) + pAt(z, q2) - 1;
+  let lo = 0, hi = 0.999999, flo = f(lo);
+  if (flo <= 0 || flo * f(hi) > 0) return [q1/Q, q2/Q];
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2, fm = f(mid);
+    if ((flo > 0) === (fm > 0)) { lo = mid; flo = fm; } else { hi = mid; }
+  }
+  const z  = (lo + hi) / 2;
+  const p1 = pAt(z, q1), p2 = pAt(z, q2), t = p1 + p2;
+  return [p1/t, p2/t];
+}
+function robustProb(prices) {
+  if (!prices.length) return null;
+  const probs = prices.map(iP).slice().sort((a,b) => a-b);
+  const mid = Math.floor(probs.length/2);
+  const median = probs.length % 2 ? probs[mid] : (probs[mid-1]+probs[mid])/2;
+  if (probs.length < MIN_CB) return probs.reduce((a,b)=>a+b,0) / probs.length;
+  const devs = probs.map(p => Math.abs(p-median)).sort((a,b)=>a-b);
+  const dMid = Math.floor(devs.length/2);
+  const mad  = (devs.length % 2 ? devs[dMid] : (devs[dMid-1]+devs[dMid])/2) * 1.4826;
+  const kept = mad > 0 ? probs.filter(p => Math.abs(p-median) <= 3*mad) : probs;
+  return kept.reduce((a,b)=>a+b,0) / kept.length;
+}
+function quantConfidence(o) {
+  const m = o.confMeta || {};
+  const depth = m.nBooks != null ? CLAMP((m.nBooks - 2) / 6, 0, 1) : 0.3;
+  const agreement = m.disp != null ? CLAMP(1 - (m.disp / 0.04), 0, 1) : 0.5;
+  const reference = o.sharp ? (o.pinnacleDeep ? 1.0 : 0.7) : 0.5;
+  // Agreement between two INDEPENDENT de-vigged estimates: the soft-book
+  // consensus and Pinnacle. Neutral (0.5) when there is no sharp reference,
+  // and for pre-fix records that never stored consProb.
+  let pinAlign = 0.5;
+  if (m.consProb != null && o.fairProb != null) {
+    pinAlign = CLAMP(1 - (Math.abs(o.fairProb - m.consProb) / 0.05), 0, 1);
+  }
+  const score = 0.30*reference + 0.30*agreement + 0.25*pinAlign + 0.15*depth;
+  return { score: CLAMP(score, 0, 1), depth, agreement, reference, pinAlign };
+}
+function confidenceLabel(c) {
+  const s = c.score;
+  const tier = s >= 0.75 ? 'High' : s >= 0.5 ? 'Moderate' : s >= 0.3 ? 'Low' : 'Very low';
+  const parts = [
+    { k: 'reference', good: 'sharp Pinnacle reference', bad: 'soft-book-only consensus (no sharp anchor)' },
+    { k: 'agreement', good: 'books closely agree on the price', bad: 'books disagree widely on the price' },
+    { k: 'pinAlign',  good: 'consensus aligns with Pinnacle', bad: 'consensus diverges from Pinnacle' },
+    { k: 'depth',     good: 'many books in the pool', bad: 'only a few books quoting' }
+  ];
+  const ranked = parts.map(p => ({ ...p, v: c[p.k] })).sort((a,b) => b.v - a.v);
+  const strongest = ranked[0], weakest = ranked[ranked.length - 1];
+  return { tier, strongest: strongest.v >= 0.6 ? strongest.good : null, weakest: weakest.v < 0.5 ? weakest.bad : null };
+}
+function pickRankScore(o) {
+  const edgeNorm = CLAMP((o?.edge || 0) / SANITY_EDGE, 0, 1);
+  const c = (o?.confidence != null) ? o.confidence : (o?.confMeta ? quantConfidence(o).score : 0.5);
+  return 0.60 * edgeNorm + 0.40 * c;
+}
+function finalistPoolFromPicks(picks) {
+  const pool = [...(picks?.researchFinalists || [...(picks?.near || []), ...(picks?.future || [])])]
+    .filter(p => p && !p.suspicious && Date.parse(p.commenceTime) > Date.now())
+    .sort((a,b) => pickRankScore(b) - pickRankScore(a));
+  const seen = new Set();
+  return pool.filter(p => { const k = clvKey(p); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0,AI_FINALISTS);
+}
+function buildPrompts(candidates, hasSearch) {
+  const searchInstr = hasSearch
+    ? 'You may use live search if your runtime supports it. Check only high-leverage context that could invalidate or strengthen a mathematically identified edge: injuries, lineups, weather, starting pitchers/goalies, schedule spots, and material line movement.'
+    : 'Use your broader learned context and reasoning patterns, but do not invent live news. Treat missing live injury/lineup/weather data as uncertainty, not evidence.';
+
+  const systemPrompt = `You are Layer 2 of emBET: an AI adjudication panel sitting ABOVE the math, not replacing it.
+
+Architecture:
+Layer 1 has already scanned the market, de-vigged prices, filtered for a modeled price gap above the edge floor, ranked candidates by edge plus structural confidence, and produced ${candidates.length} finalists. These are price disagreements between books — not guaranteed wins, not known positive expected value, just mathematically identified gaps worth evaluating.
+Layer 2 must choose ONE of those finalists. Do not recommend anything outside the finalist pool. Do not re-run the sportsbook math. Your job is to decide which identified price gap looks most likely to be real — not a data artifact, stale quote, or a line that has already moved — after broader contextual reasoning.
+
+Use all available reasoning sources freely: market structure, sport context, public-team bias, schedule spots, injury/lineup/weather risk, sharp-vs-soft-book implications, and whether the edge looks robust or fragile. ${searchInstr}
+
+Return ONLY valid JSON. No markdown, no code fences, no prose outside JSON.
+{
+  "topPickId": "exact id from the finalist pool",
+  "confidence": "HIGH|MEDIUM|LOW",
+  "reasoning": "concise explanation of why this finalist has the most defensible price gap — market structure, context, and what makes it more trustworthy than the alternatives",
+  "risk": "main reason this could be wrong"
+}`;
+
+  const userPrompt = `Top ${candidates.length} math-filtered finalists:\n${JSON.stringify(candidates.map((c, i) => ({
+    finalistRank: i + 1,
+    id: c.id,
+    sport: c.sport,
+    game: c.game,
+    commenceTime: c.commenceTime,
+    market: c.mkt,
+    bet: c.bet,
+    book: c.book,
+    offeredLine: c.line,
+    referencePrice: c.fairOdds,
+    fairProb: c.fairProb,
+    // PHASE 0 (2.4): named explicitly by unit so the panel isn't reasoning
+    // about a number whose scale it has to guess. Architecture unchanged.
+    edgeProbabilityPoints: c.edgeProb != null ? +(c.edgeProb * 100).toFixed(2) : null,
+    expectedValuePct:      c.edgeEV   != null ? +(c.edgeEV   * 100).toFixed(2) : null,
+    structuralConfidence: c.confidence ?? null,
+    sharpReference: c.sharp ? (c.pinnacleDeep ? 'Pinnacle deep market' : 'Pinnacle thin market') : 'Consensus fallback',
+    confidenceMeta: c.confMeta || null
+  })), null, 2)}`;
+
+  return { systemPrompt, userPrompt };
+}
+async function callModel(model, workerUrl, candidates) {
+  if (!workerUrl || !candidates?.length) return null;
+  const { systemPrompt, userPrompt } = buildPrompts(candidates, model.hasSearch);
+  const r = await fetch(`${workerUrl.replace(/\/$/, '')}/api/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Embet-Secret': LS.get('embet_worker_secret') || '' },
+    body: JSON.stringify({ provider: model.provider, model: model.model, systemPrompt, userPrompt })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error(d.error || `Worker returned ${r.status}`);
+  const raw = String(d.text || d.content || d.response || '').replace(/```json/gi, '').replace(/```/g, '').trim();
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No JSON object found in AI response');
+  const result = JSON.parse(match[0]);
+  if (!candidates.some(c => c.id === result.topPickId)) throw new Error('AI chose a pick outside the finalist pool');
+  return {
+    modelId: model.id,
+    modelName: model.name,
+    topPickId: result.topPickId,
+    confidence: result.confidence || 'MEDIUM',
+    reasoning: result.reasoning || 'Selected this finalist as the strongest blend of math and context.',
+    risk: result.risk || ''
+  };
+}
+function aiConsensus(modelResults) {
+  const vals = Object.values(modelResults || {}).filter(Boolean);
+  if (!vals.length) return null;
+  const counts = {};
+  vals.forEach(r => counts[r.topPickId] = (counts[r.topPickId] || 0) + 1);
+  const topId = Object.entries(counts).sort((a,b) => b[1] - a[1])[0]?.[0] || null;
+  return { topPickId: topId, votes: counts[topId] || 0, total: vals.length };
+}
+
+async function runAllModels(candidates, basePicks) {
+  const workerUrl = getWorkerUrl();
+  const activeIds = getAiModels().filter(id => MODELS[id]);
+  if (st.aiLoading || !workerUrl || !activeIds.length) return;
+  candidates = finalistPoolFromPicks({researchFinalists:candidates});
+  if (!candidates.length) return;
+  candidates = JSON.parse(JSON.stringify(candidates));
+  const requestedAt = new Date().toISOString();
+  const cutoff = Math.min(...candidates.map(p => Date.parse(p.commenceTime)));
+  const batch = { batchKey:uid(), schemaVersion:4, requestedAt,
+    candidates, layer1TopId:candidates[0].id, status:'requested', eligible:false,
+    settings:JSON.parse(JSON.stringify(st.settings)), models:activeIds.map(id => ({...MODELS[id]})) };
+  recordLayerBatch(batch);
+
+  st.aiLoading = true;
+  try {
+  st.aiStatuses = {};
+  st.aiErrors = {};
+  activeIds.forEach(id => st.aiStatuses[id] = 'loading');
+  render();
+
+  const settled = await Promise.allSettled(activeIds.map(id => callModel(MODELS[id], workerUrl, candidates)));
+  const modelResults = {};
+  settled.forEach((res, i) => {
+    const id = activeIds[i];
+    if (res.status === 'fulfilled' && res.value) {
+      modelResults[id] = res.value;
+      st.aiStatuses[id] = 'ok';
+    } else {
+      st.aiStatuses[id] = 'error';
+      st.aiErrors[id] = res.reason?.message || String(res.reason || 'Unknown error');
+    }
+  });
+
+  // PHASE 0 (3.2): candidates[] arrives rank-ordered from
+  // finalistPoolFromPicks(), so candidates[0] is Layer 1's #1. Persisting it
+  // alongside the consensus is what makes the Layer 1 vs Layer 2 question
+  // answerable later; it costs nothing at scan time.
+  const consensus       = aiConsensus(modelResults);
+  const layer1TopId     = candidates[0]?.id || null;
+  const consensusId     = consensus?.topPickId || null;
+  const aiChangedChoice = !!(layer1TopId && consensusId && layer1TopId !== consensusId);
+
+  const next = { ...(basePicks || st.picks), aiFinalists: candidates.map(c => c.id), modelResults, aiConsensus: consensus, aiGeneratedAt: new Date().toISOString(), layer1TopId, consensusId, aiChangedChoice };
+  st.picks = next;
+  const completedAt = new Date().toISOString();
+  recordLayerBatch({ ...batch, completedAt, modelResults, errors:{...st.aiErrors},
+    consensusId, aiChangedChoice, votes:consensus?.votes || 0, total:consensus?.total || 0,
+    eligible:!!consensusId && Date.parse(completedAt) < cutoff,
+    status:!consensusId ? 'failed' : Date.parse(completedAt) >= cutoff ? 'late' : 'complete' });
+  LS.set(PICKS_KEY(), next);
+  } catch (e) { st.err = `AI results could not be saved: ${e.message}`; }
+  finally { st.aiLoading = false; render(); }
+}
+function aiPanel() {
+  const finalists = finalistPoolFromPicks(st.picks);
+  const results = st.picks?.modelResults || {};
+  const vals = Object.values(results).filter(Boolean);
+  const consensus = st.picks?.aiConsensus || aiConsensus(results);
+  const workerUrl = getWorkerUrl();
+
+  if (!finalists.length) return '';
+  const byId = Object.fromEntries(finalists.map(p => [p.id, p]));
+  const finalistRows = finalists.map((p, i) => `<div class="ai-pick-row">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+      <div><span class="mono" style="color:var(--text3)">#${i+1}</span> <strong>${esc(p.bet)}</strong> <span style="color:var(--text2)">&middot; ${esc(p.game)}</span></div>
+      <span class="mono" style="color:var(--green);white-space:nowrap">${fGap(p.edge)}</span>
+    </div>
+    <div style="color:var(--text3);margin-top:2px">${esc(p.book)} ${fO(p.line)} &middot; ${p.sharp ? (p.pinnacleDeep ? 'Pinnacle ref' : 'Pinnacle thin') : 'Consensus'} &middot; structural confidence ${(100*(p.confidence ?? 0)).toFixed(0)}%</div>
+  </div>`).join('');
+
+  const statusLine = Object.keys(MODELS).filter(id => getAiModels().includes(id)).map(id => {
+    const stt = st.aiStatuses[id];
+    const cls = stt === 'ok' ? 'success' : stt === 'error' ? 'danger' : stt === 'loading' ? 'warning' : 'neutral';
+    return bdg(cls, `${MODELS[id].name}${stt ? `: ${stt}` : ''}`);
+  }).join(' ');
+
+  const errorMsgs = [...new Set(Object.values(st.aiErrors || {}))];
+  const errorDetail = errorMsgs.length
+    ? `<div style="margin-top:6px;font-size:11px;color:var(--red);font-family:var(--mono)">${errorMsgs.map(esc).join('<br>')}</div>`
+    : '';
+
+  const resultRows = vals.map(r => {
+    const p = byId[r.topPickId];
+    return `<div class="ai-pick-row" style="border-color:var(--accent-border)">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:4px">
+        <div><strong>${esc(r.modelName)}</strong> chose <strong>${esc(p?.bet || r.topPickId)}</strong></div>
+        ${bdg(r.confidence === 'HIGH' ? 'success' : r.confidence === 'LOW' ? 'warning' : 'info', r.confidence)}
+      </div>
+      <div style="color:var(--text2)">${esc(r.reasoning)}</div>
+      ${r.risk ? `<div style="color:var(--text3);margin-top:4px">Risk: ${esc(r.risk)}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  const consensusPick = consensus?.topPickId ? byId[consensus.topPickId] : null;
+  return `<div class="section-divider">Layer 2 — AI finalist adjudication</div>
+  <div class="ai-card">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px">
+      <div>
+        <div style="font-size:14px;font-weight:500;margin-bottom:3px">AI panel chooses from the top ${AI_FINALISTS} math-filtered finalists</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.6">The AIs cannot pick outside this pool. Layer 1 finds price disagreement; Layer 2 decides which finalist has the cleanest broader context.</div>
+      </div>
+      ${workerUrl ? `<button class="btn" style="font-size:11px;white-space:nowrap" onclick="EL.runAiPanel()">Run AI panel</button>` : `<button class="btn" style="font-size:11px;white-space:nowrap" onclick="EL.toggleSettings()">Add AI worker</button>`}
+    </div>
+    ${statusLine ? `<div style="margin-bottom:10px">${statusLine}</div>` : ''}
+    ${errorDetail}
+    ${consensusPick ? `<div style="background:var(--accent-bg);border:0.5px solid var(--accent-border);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:13px"><strong>Consensus:</strong> ${esc(consensusPick.bet)} &middot; ${esc(consensusPick.game)} <span class="mono" style="color:var(--green)">${fGap(consensusPick.edge)}</span> <span style="color:var(--text2)">(${consensus.votes}/${consensus.total} model votes)</span></div>` : ''}
+    ${resultRows || (st.aiLoading ? `<div class="ai-pick-row">AI panel running…</div>` : `<div style="font-size:12px;color:var(--text3);margin-bottom:8px">No AI results yet. Add your Cloudflare worker URL in Settings, then run the panel.</div>`)}
+    <div style="margin-top:12px;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Current finalist pool</div>
+    ${finalistRows}
+  </div>`;
+}
+function leaderboardPanel() {
+  const perf = LS.get('embet_model_perf') || {};
+  const ids = [...new Set([...Object.keys(perf), ...studyBatches().flatMap(b => Object.keys(b.modelResults || {}))])];
+  if (!ids.length) return '';
+
+  const rows = ids.map(id => {
+    const data = perf[id] || {modelName:MODELS[id]?.name || id, picks:[]};
+    // PHASE 0 (2.1): pre-patch leaderboard entries were locked from fabricated
+    // closes and cannot be re-derived, so they are excluded rather than trusted.
+    const evaluated = modelEvaluations(id);
+    const hasEnough = evaluated.length >= MIN_SCORED;
+    const avgCLV = evaluated.length ? evaluated.reduce((s,p) => s + p.clv_pp, 0) / evaluated.length : null;
+    const statusTxt = !hasEnough ? `${evaluated.length}/${MIN_SCORED} needed`
+                     : avgCLV > 1.0 ? 'Leading' : avgCLV > 0 ? 'Competitive' : 'Lagging';
+    const statusCls = !hasEnough ? 'neutral' : avgCLV > 1.0 ? 'success' : avgCLV > 0 ? 'info' : 'warning';
+    return `<div class="ai-pick-row">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>${esc(data.modelName || id)}</strong>
+        ${bdg(statusCls, statusTxt)}
+      </div>
+      <div style="color:var(--text3);margin-top:2px">
+        ${studyBatches().filter(b => b.modelResults?.[id]).length} prospective selections &middot; ${evaluated.length} settled${hasEnough ? ` &middot; avg CLV ${fCLV(avgCLV/100)}` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="section-divider">Model leaderboard — prospective records only</div>
+  <div class="ai-card">
+    <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:10px">
+      Tracks prospective AI selections against an observed pregame price proxy. Older AI records remain in backups but do not receive scores.
+      A model needs ${MIN_SCORED} eligible scored picks before it gets a status label -- below that, it's too small a sample to mean anything.
+    </div>
+    ${rows}
+  </div>`;
+}
+const fO    = o => o == null ? '—' : o > 0 ? `+${o}` : `${o}`;
+const fE    = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%`;
+// PHASE 0 (2.4): edge is now expressed in probability points, the same unit as
+// CLV, so it needs its own formatter rather than borrowing the "%" one.
+const fGap  = v => v == null ? '—' : `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
+const fCLV  = v => `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}pp`;
+const fDT   = iso => new Date(iso).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+const fDate = iso => new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+const today = () => new Date().toISOString().slice(0,10);
+const uid = () => crypto.randomUUID();
+const esc   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function daysUntil(iso) {
+  const now = new Date();
+  const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const gameDate = new Date(iso);
+  const gameDateOnly = new Date(gameDate.getFullYear(), gameDate.getMonth(), gameDate.getDate());
+  return Math.round((gameDateOnly - nowDate) / (1000 * 60 * 60 * 24));
+}
+const mem = {};
+const LS = {
+  get(k)   { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return mem[k]||null; } },
+  set(k,v) { localStorage.setItem(k,JSON.stringify(v)); mem[k]=v; }
+};
+const st = { loading:true, aiLoading:false, err:'', picks:null, history:[], pending:[], showHist:false, settleId:null, keyReady:false, bankroll:null, settings:{}, showSettings:false, aiStatuses:{}, workerUrl:'', aiModels:DEFAULT_AI_MODELS };
+function bdg(cls, text) {
+  return `<span class="badge b-${cls||'neutral'}">${esc(String(text))}</span>`;
+}
+function getRes(id) { return st.history.find(h=>h.id===id)?.result||null; }
+function rCard(p, type, isTop) {
+  if (!p) return '';
+  const isNear   = type === 'near';
+  const res      = getRes(p.id);
+  const resBadge = res
+    ? `<div style="margin-top:10px">${bdg(res==='W'?'success':res==='L'?'danger':'warning', res==='W'?'Win':res==='L'?'Loss':'Push')}</div>`
+    : '';
+  // PHASE 0 (2.1): only a close actually observed from the market after kickoff
+  // is reported as a Pregame proxy CLV. A fallback or pre-patch close is shown as
+  // unverified rather than presented as a real result.
+  const finalClv   = isCapturedClose(p) ? cCLV(p.line, p.closingLine) : null;
+  const currentClv = (p.closingLine == null && p.latestLine != null) ? cCLV(p.line, p.latestLine) : null;
+  const clvLine = finalClv != null
+    ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">
+         Closing line: <span class="mono" style="color:var(--text)">${fO(p.closingLine)}</span>
+         &ensp;&middot;&ensp;
+         <span class="mono" style="font-weight:500;color:${finalClv>=0?'var(--green)':'var(--red)'}">${fCLV(finalClv)} Pregame proxy CLV</span>
+       </div>`
+    : p.closingLine != null
+    ? `<div style="margin-top:10px;font-size:11px;color:var(--text3)">
+         Closing line not verified — ${p.closeSource === 'legacy'
+           ? 'recorded before emBET tracked where a closing price came from'
+           : 'the market was never re-checked after kickoff, so this is the last price seen, not the close'}.
+         Excluded from CLV and calibration.
+       </div>`
+    : currentClv != null
+    ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">
+         Latest line: <span class="mono" style="color:var(--text)">${fO(p.latestLine)}</span>
+         &ensp;&middot;&ensp;
+         <span class="mono" style="font-weight:500;color:${currentClv>=0?'var(--green)':'var(--red)'}">${fCLV(currentClv)} Current CLV</span>
+         <span style="color:var(--text3)"> (pregame — not final)</span>
+       </div>`
+    : `<div style="margin-top:10px;font-size:11px;color:var(--text3)">No line movement captured yet — open emBET again before this game starts to track it.</div>`;
+  const days     = daysUntil(p.commenceTime);
+  const daysTxt  = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days} days away`;
+  const kStake   = st.bankroll ? kellyStake(p.fairProb, p.line, st.bankroll) : null;
+  const conf     = p.confMeta ? quantConfidence(p) : null;
+  const confLbl  = conf ? confidenceLabel(conf) : null;
+  const confColor = conf ? (conf.score >= 0.75 ? 'var(--green)' : conf.score >= 0.5 ? 'var(--amber)' : 'var(--text2)') : 'var(--text2)';
+
+  return `
+  <div class="${isNear ? 'near-card' : 'future-card'}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px">
+          ${isTop ? `<span class="badge" style="background:var(--green-bg);color:var(--green);border:0.5px solid var(--green-border);font-weight:600">★ Top pick</span>` : ''}
+          ${bdg('neutral', p.sport)}
+          ${bdg('neutral', p.mkt)}
+          ${bdg(p.sharp ? 'info' : 'warning', p.sharp ? (p.pinnacleDeep ? 'Pinnacle ref' : 'Pinnacle (thin mkt)') : 'Consensus')}
+          ${bdg('neutral', daysTxt)}
+        </div>
+        <div style="font-size:18px;font-weight:500;margin-bottom:3px">${esc(p.bet)}</div>
+        <div style="font-size:13px;color:var(--text2)">${esc(p.game)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px">${fDT(p.commenceTime)}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div class="mono" style="font-size:30px;font-weight:500;color:var(--green);line-height:1">${fGap(p.edge)}</div>
+        <div class="lbl" style="margin-top:3px;margin-bottom:0">edge</div>
+        ${conf ? `<div style="margin-top:8px"><span class="mono" style="font-size:15px;font-weight:500;color:${confColor}">${confLbl.tier}</span><div class="lbl" style="margin-top:1px;margin-bottom:0">confidence</div></div>` : ''}
+      </div>
+    </div>
+    ${conf ? `<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg);border-radius:6px;font-size:11px;color:var(--text2);line-height:1.6">
+      <span style="color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-size:10px">Why this confidence</span><br>
+      ${confLbl.strongest ? `Supporting: ${confLbl.strongest}.` : ''}${confLbl.weakest ? ` Caution: ${confLbl.weakest}.` : ''}${(!confLbl.strongest && !confLbl.weakest) ? 'Middling on every structural signal — no strong support or clear red flag.' : ''}
+      <span style="color:var(--text3)"> Structural trust only — does not account for injuries, lineups, or line movement.</span>
+    </div>` : ''}
+    <div style="display:grid;grid-template-columns:${kStake!=null ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr'};gap:10px;padding:10px 12px;background:var(--bg);border-radius:6px">
+      <div>
+        <span class="lbl">Book</span>
+        <div style="font-size:15px;font-weight:500">${esc(p.book)}</div>
+      </div>
+      <div>
+        <span class="lbl">Line</span>
+        <div class="mono" style="font-size:22px;font-weight:500">${fO(p.line)}</div>
+      </div>
+      <div>
+        <span class="lbl">Reference price</span>
+        <div class="mono" style="font-size:15px;color:var(--text2)">${fO(p.fairOdds)}</div>
+      </div>
+      ${kStake!=null ? `
+      <div>
+        <span class="lbl">Stake (¼-Kelly)</span>
+        <div class="mono" style="font-size:15px;font-weight:500">$${kStake.toFixed(0)}</div>
+      </div>` : ''}
+    </div>
+    ${(p.sharp && !p.pinnacleDeep) ? `<div style="margin-top:8px;font-size:11px;color:var(--amber)">Pinnacle is the reference here, but it carries much less volume in ${esc(p.sport)} than in the major pro leagues — treat "fair value" as a rougher anchor, not a precise probability.</div>` : ''}
+    ${kStake!=null ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">Stake sizing assumes the reference price's implied probability is accurate. Real-world uncertainty in that estimate may justify a smaller wager than shown.</div>` : ''}
+    ${kStake==null ? `<div style="margin-top:8px;font-size:11px;color:var(--text3)">No bankroll set — <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">tap to enable stake-sizing suggestions</span></div>` : ''}
+    ${resBadge}
+    ${clvLine}
+  </div>`;
+}
+function flagCard(o) {
+  return `
+  <div class="card" style="border-left:3px solid var(--red);font-size:13px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">
+      <div style="font-weight:500">${esc(o.bet)} <span style="color:var(--text2);font-weight:400">&middot; ${esc(o.book)}</span></div>
+      <span class="mono" style="color:var(--red);font-weight:500;white-space:nowrap">${fGap(o.edge)}</span>
+    </div>
+    <div style="color:var(--text2);font-size:12px">${esc(o.game)} &middot; ${esc(o.sport)} &middot; ${esc(o.mkt)}</div>
+    <div style="color:var(--text2);font-size:12px;margin-top:6px">Price gap exceeds the ${(SANITY_EDGE*100).toFixed(0)}pp sanity cap — real sharp-vs-soft mispricings essentially never get this large. Treat this as a possible data issue, not a play, until checked manually against the actual book.</div>
+  </div>`;
+}
+// ---------------------------------------------------------------------------
+// PHASE 0 (2.1 / 2.3) -- admissible CLV observations
+//
+// Every CLV statistic previously read:
+//     [...st.pending, ...st.history].filter(p => p.closingLine != null)
+// which admitted two classes of bad row:
+//
+//   (a) Fabricated closes. finalizeStalePending() assigned
+//       closingLine = latestLine ?? line, and for any pick where the app was
+//       not reopened between detection and kickoff, latestLine still equalled
+//       the entry line -- so cCLV(line, line) === 0. Those synthetic zeroes
+//       entered the headline average, the 95% CI, all four calibration tables
+//       and the model leaderboard, shrinking every result toward zero while
+//       inflating N.
+//
+//   (b) Duplicates. The scan emits one row per (game x market x outcome x
+//       book), so the same wager offered at DraftKings and FanDuel produced
+//       two near-perfectly correlated observations. clvSE = sd/sqrt(n) assumes
+//       independence, so duplicates made the interval too narrow.
+//
+// Only timestamped pregame observations in the declared five-minute window are admissible,
+// and each underlying wager contributes exactly one row.
+// ---------------------------------------------------------------------------
+const CLOSE_WINDOW_MS = 5 * 60 * 1000;
+const validOdds = n => Number.isFinite(n) && Math.abs(n) >= 100;
+function isCapturedClose(p) {
+  const e = p?.closeEvidence, start = Date.parse(p?.commenceTime);
+  const quote = Date.parse(e?.quoteAt), observed = Date.parse(e?.observedAt);
+  return !!e && p.closeSource === 'captured' && e.method === 'observed-pregame-v1' &&
+    validOdds(p.line) && validOdds(p.closingLine) && p.closingLine === e.price &&
+    Number.isFinite(start) && Number.isFinite(quote) && Number.isFinite(observed) &&
+    quote <= observed && observed < start && start - quote <= CLOSE_WINDOW_MS &&
+    Date.now() >= start && e.gameId === p.gameId && e.mkt === p.mkt &&
+    e.bet === p.bet && e.book === p.book;
+}
+function clvKey(p) {
+  return `${p.gameId || p.game || '?'}|${p.mkt || '?'}|${p.bet || '?'}`;
+}
+function clvObservations() {
+  const byKey = new Map();
+  for (const p of [...st.pending, ...st.history]) {
+    if (!isCapturedClose(p) || typeof p.line !== 'number') continue;
+    const k = clvKey(p);
+    const prev = byKey.get(k);
+    // Collapse duplicates to the most favorable price actually obtainable.
+    if (!prev || iP(p.line) < iP(prev.line)) byKey.set(k, p);
+  }
+  return [...byKey.values()];
+}
+function clvExcludedCounts() {
+  let legacy = 0, fallback = 0, duplicates = 0;
+  const seen = new Set();
+  for (const p of [...st.pending, ...st.history]) {
+    if (!p || p.closingLine == null) continue;
+    if (p.closeSource === 'legacy')   { legacy++;   continue; }
+    if (p.closeSource === 'fallback') { fallback++; continue; }
+    if (p.closeSource === 'captured') {
+      const k = clvKey(p);
+      if (seen.has(k)) duplicates++; else seen.add(k);
+    }
+  }
+  return { legacy, fallback, duplicates, total: legacy + fallback + duplicates };
+}
+
+// ---------------------------------------------------------------------------
+// PHASE 0 (3.2) -- Layer 1 vs Layer 2 instrumentation
+//
+// The model leaderboard tracked each AI's CLV but never recorded what Layer 1
+// alone would have chosen, so the decisive question -- does the AI panel
+// improve CLV over the math? -- was unanswerable. candidates[] is already
+// rank-ordered, so candidates[0] IS Layer 1's #1; it only had to be persisted
+// as a comparator.
+// ---------------------------------------------------------------------------
+function capturedById() {
+  const m = new Map();
+  for (const p of [...st.pending, ...st.history]) if (isCapturedClose(p)) m.set(p.id, p);
+  return m;
+}
+function layerBatches() { return LS.get('embet_layer_batches') || []; }
+function recordLayerBatch(batch) {
+  const log = layerBatches(), i = log.findIndex(b => b.batchKey === batch.batchKey);
+  if (i < 0) log.push(batch); else log[i] = batch;
+  LS.set('embet_layer_batches', log);
+}
+function studyBatches() {
+  return layerBatches().filter(b => b.schemaVersion === 4 && b.eligible &&
+    b.status === 'complete' && Array.isArray(b.candidates))
+    .sort((a,b) => a.requestedAt.localeCompare(b.requestedAt));
+}
+function modelEvaluations(modelId) {
+  const closes = capturedById(), seen = new Set(), out = [];
+  for (const b of studyBatches()) {
+    const r = b.modelResults?.[modelId];
+    const entry = b.candidates.find(p => p.id === r?.topPickId);
+    if (!entry || seen.has(clvKey(entry))) continue;
+    seen.add(clvKey(entry)); // select the first decision before inspecting its close
+    const close = closes.get(entry.id);
+    if (close) out.push({clv_pp:100*cCLV(entry.line,close.closingLine)});
+  }
+  return out;
+}
+function layerComparison() {
+  const byId = capturedById();
+  const pairs = [];
+  const usedEvents = new Set();
+  for (const b of studyBatches()) {
+    const a = b.candidates.find(p => p.id === b.layer1TopId);
+    const c = b.candidates.find(p => p.id === b.consensusId);
+    if (!a || !c) continue;
+    if ([a.gameId,c.gameId].some(id => usedEvents.has(id))) continue;
+    usedEvents.add(a.gameId); usedEvents.add(c.gameId);
+    const ac = byId.get(a.id), cc = byId.get(c.id);
+    if (!ac || !cc) continue;
+    pairs.push({l1:cCLV(a.line,ac.closingLine),l2:cCLV(c.line,cc.closingLine),changed:b.aiChangedChoice});
+  }
+  if (!pairs.length) return null;
+  const mean  = xs => xs.reduce((s,x) => s+x, 0) / xs.length;
+  const diffs = pairs.map(p => p.l2 - p.l1);
+  const md    = mean(diffs);
+  const sd    = stdev(diffs, md);
+  const se    = (sd != null && diffs.length >= 30) ? sd / Math.sqrt(diffs.length) : null;
+  const chg   = pairs.filter(p => p.changed);
+  return {
+    n: pairs.length,
+    l1: mean(pairs.map(p => p.l1)),
+    l2: mean(pairs.map(p => p.l2)),
+    diff: md,
+    ci95: se != null ? se * 1.96 : null,
+    nChanged: chg.length,
+    diffChanged: chg.length ? mean(chg.map(p => p.l2 - p.l1)) : null
+  };
+}
+function layerComparisonPanel() {
+  const c = layerComparison();
+  if (!c) return '';
+  const row = (label, v) => `<tr>
+    <td style="font-size:12px">${label}</td>
+    <td style="text-align:right"><span class="mono" style="font-size:12px;font-weight:500;color:${v>=0?'var(--green)':'var(--red)'}">${fCLV(v)}</span></td>
+  </tr>`;
+  return `<div class="section-divider">Layer 1 vs Layer 2</div>
+  <div class="ai-card">
+    <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:10px">
+      Does the AI panel beat the math alone? Counts only batches where both the Layer 1 top-ranked finalist and the AI consensus pick have a verified closing line. If the difference never turns positive, Layer 2 belongs in the interface as context, not as the thing that picks.
+    </div>
+    <table class="tbl"><tbody>
+      ${row('Layer 1 #1', c.l1)}
+      ${row('AI consensus', c.l2)}
+      ${row('Paired difference', c.diff)}
+    </tbody></table>
+    <div style="padding:10px 0 0;font-size:11px;color:var(--text3);line-height:1.6">
+      ${c.n} paired batch${c.n===1?'':'es'}${c.ci95!=null?` &middot; difference 95% CI ±${(c.ci95*100).toFixed(1)}pp`:''}.
+      ${c.nChanged>0
+        ? `The AI changed the pick in ${c.nChanged} of them; on those alone the difference is ${fCLV(c.diffChanged)}.`
+        : `The AI has not yet disagreed with Layer 1 on any settled batch, so the two columns are still measuring the same picks.`}
+      ${c.n < LAYER_TARGET_BATCHES ? ` Only first eligible comparisons with non-overlapping events are counted. Sample size alone does not establish an AI advantage.` : ''}
+    </div>
+  </div>`;
+}
+
+// PHASE 0 (2.4): buckets are probability points now, not EV percent. The
+// numeric boundaries are unchanged; only the unit and label differ.
+const EDGE_BUCKETS = [
+  { lo: 0.015, hi: 0.025, label: '1.5–2.5pp' },
+  { lo: 0.025, hi: 0.05,  label: '2.5–5pp'   },
+  { lo: 0.05,  hi: 0.10,  label: '5–10pp'    },
+  { lo: 0.10,  hi: Infinity, label: '>10pp'  }
+];
+function calibrationRows() {
+  const tracked = clvObservations().filter(p => p.entrySchema === 4 && typeof p.edge === 'number');
+  return EDGE_BUCKETS.map(b => {
+    const inB = tracked.filter(p => p.edge >= b.lo && p.edge < b.hi);
+    const clvs = inB.map(p => cCLV(p.line, p.closingLine));
+    const avg  = clvs.length ? clvs.reduce((a,c)=>a+c,0) / clvs.length : null;
+    return { label: b.label, n: inB.length, avgClv: avg, lo: b.lo };
+  });
+}
+function calibrationRecommendation(rows) {
+  const usable = rows.filter(r => r.n >= SAMPLE_EARLY && r.avgClv != null);
+  if (usable.length < 2) return null;
+  const lowest = usable[0];
+  if (lowest.avgClv > 0) return null;
+  const better = usable.slice(1).find(r => r.avgClv > 0);
+  if (!better) return null;
+  return { from: lowest.label, to: better.label, newFloor: better.lo, fromClv: lowest.avgClv, toClv: better.avgClv };
+}
+function calibrationCard() {
+  const rows = calibrationRows();
+  const totalN = rows.reduce((s,r)=>s+r.n,0);
+  const rec = calibrationRecommendation(rows);
+  const body = rows.map(r => `
+    <tr>
+      <td style="font-size:12px">${r.label}</td>
+      <td style="font-size:12px;color:var(--text2);text-align:center">${r.n || '—'}</td>
+      <td style="text-align:right">${
+        r.avgClv != null
+          ? `<span class="mono" style="font-size:12px;font-weight:500;color:${r.avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(r.avgClv)}</span>`
+          : `<span style="font-size:12px;color:var(--text3)">—</span>`
+      }</td>
+    </tr>`).join('');
+  return `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:14px 16px 10px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Edge calibration</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6">Average CLV by modeled price-gap bucket, both in probability points, so the two are directly comparable. If CLV rises as the gap bucket rises, the estimates are tracking something real. Flat or negative means the gap number isn't predictive yet. ${totalN < 20 ? `Only ${totalN} verified closes tracked so far — this needs a few hundred to read clearly.` : ''}</div>
+    </div>
+    <table class="tbl"><tbody>
+      <tr style="color:var(--text3)">
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase">Edge bucket</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:center">N</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:right">Avg CLV</td>
+      </tr>
+      ${body}
+    </tbody></table>
+    ${rec ? `
+    <div style="padding:10px 16px;background:var(--amber-bg);border-top:0.5px solid var(--amber-border)">
+      <div style="font-size:12px;color:var(--amber);font-weight:500">${rec.from} is running ${fCLV(rec.fromClv)} avg CLV while ${rec.to} is running ${fCLV(rec.toClv)} — with enough sample in both to take seriously.</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">Worth raising your minimum edge to ${(rec.newFloor*100).toFixed(1)}%. <button class="btn" style="font-size:11px;padding:2px 9px;margin-left:4px" onclick="EL.saveSetting('minEdge', ${rec.newFloor})">Apply</button></div>
+    </div>` : ''}
+  </div>`;
+}
+const ODDS_BUCKETS = [
+  { lo: 0,   hi: 150, label: '\u00b1150 or tighter' },
+  { lo: 150, hi: 250, label: '150\u2013250' },
+  { lo: 250, hi: Infinity, label: '250+' }
+];
+function oddsCalibrationRows() {
+  const tracked = clvObservations();
+  return ODDS_BUCKETS.map(b => {
+    const inB = tracked.filter(p => {
+      const abs = Math.abs(p.line);
+      return abs >= b.lo && abs < b.hi;
+    });
+    const clvs = inB.map(p => cCLV(p.line, p.closingLine));
+    const avg  = clvs.length ? clvs.reduce((a,c)=>a+c,0) / clvs.length : null;
+    return { label: b.label, n: inB.length, avgClv: avg };
+  });
+}
+function oddsCalibrationCard() {
+  const rows = oddsCalibrationRows();
+  const totalN = rows.reduce((s,r)=>s+r.n,0);
+  const body = rows.map(r => `
+    <tr>
+      <td style="font-size:12px">${r.label}</td>
+      <td style="font-size:12px;color:var(--text2);text-align:center">${r.n || '\u2014'}</td>
+      <td style="text-align:right">${
+        r.avgClv != null
+          ? `<span class="mono" style="font-size:12px;font-weight:500;color:${r.avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(r.avgClv)}</span>`
+          : `<span style="font-size:12px;color:var(--text3)">\u2014</span>`
+      }</td>
+    </tr>`).join('');
+  return `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:14px 16px 10px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Odds-band calibration</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6">Average CLV by how far the line sits from even money. Shin's de-vig is theoretically most reliable near even lines \u2014 this checks whether that holds in your actual results. ${totalN < 20 ? `Only ${totalN} tracked so far.` : ''}</div>
+    </div>
+    <table class="tbl"><tbody>
+      <tr style="color:var(--text3)">
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase">Odds band</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:center">N</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:right">Avg CLV</td>
+      </tr>
+      ${body}
+    </tbody></table>
+  </div>`;
+}
+function confidenceCalibrationRows() {
+  const tracked = clvObservations().filter(p => p.entrySchema === 4 && p.confVersion === 2 && typeof p.confidence === 'number');
+  const tiers = [
+    { lo: 0.75, hi: 1.01, label: 'High' },
+    { lo: 0.5,  hi: 0.75, label: 'Moderate' },
+    { lo: 0.3,  hi: 0.5,  label: 'Low' },
+    { lo: 0,    hi: 0.3,  label: 'Very low' }
+  ];
+  return tiers.map(t => {
+    const inB = tracked.filter(p => p.confidence >= t.lo && p.confidence < t.hi);
+    const clvs = inB.map(p => cCLV(p.line, p.closingLine));
+    const avg  = clvs.length ? clvs.reduce((a,c)=>a+c,0) / clvs.length : null;
+    return { label: t.label, n: inB.length, avgClv: avg };
+  });
+}
+function confidenceCalibrationCard() {
+  const rows = confidenceCalibrationRows();
+  const totalN = rows.reduce((s,r)=>s+r.n,0);
+  const body = rows.map(r => `
+    <tr>
+      <td style="font-size:12px">${r.label}</td>
+      <td style="font-size:12px;color:var(--text2);text-align:center">${r.n || '\u2014'}</td>
+      <td style="text-align:right">${
+        r.avgClv != null
+          ? `<span class="mono" style="font-size:12px;font-weight:500;color:${r.avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(r.avgClv)}</span>`
+          : `<span style="font-size:12px;color:var(--text3)">\u2014</span>`
+      }</td>
+    </tr>`).join('');
+  return `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:14px 16px 10px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Confidence calibration</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6">Average CLV by structural confidence tier. If High beats Low, the confidence score is worth its 40% weight in pickRankScore. If it's flat, that weight should probably drop. ${totalN < 20 ? `Only ${totalN} tracked so far.` : ''}</div>
+    </div>
+    <table class="tbl"><tbody>
+      <tr style="color:var(--text3)">
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase">Tier</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:center">N</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:right">Avg CLV</td>
+      </tr>
+      ${body}
+    </tbody></table>
+  </div>`;
+}
+function sportCalibrationRows() {
+  const tracked = clvObservations().filter(p => p.sport);
+  const sports = [...new Set(tracked.map(p => p.sport))];
+  return sports.map(sport => {
+    const inB = tracked.filter(p => p.sport === sport);
+    const clvs = inB.map(p => cCLV(p.line, p.closingLine));
+    const avg  = clvs.length ? clvs.reduce((a,c)=>a+c,0) / clvs.length : null;
+    return { label: sport, n: inB.length, avgClv: avg };
+  }).sort((a,b) => b.n - a.n);
+}
+function sportCalibrationCard() {
+  const rows = sportCalibrationRows();
+  if (!rows.length) return '';
+  const totalN = rows.reduce((s,r)=>s+r.n,0);
+  const body = rows.map(r => `
+    <tr>
+      <td style="font-size:12px">${esc(r.label)}</td>
+      <td style="font-size:12px;color:var(--text2);text-align:center">${r.n || '\u2014'}</td>
+      <td style="text-align:right">${
+        r.avgClv != null
+          ? `<span class="mono" style="font-size:12px;font-weight:500;color:${r.avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(r.avgClv)}</span>`
+          : `<span style="font-size:12px;color:var(--text3)">\u2014</span>`
+      }</td>
+    </tr>`).join('');
+  return `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:14px 16px 10px">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Sport calibration</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6">Average CLV by sport. Pinnacle is deepest in NBA/NFL/NHL/MLB/EPL \u2014 if the thinner-market sports are dragging the average down, that's evidence to weight or exclude them. ${totalN < 20 ? `Only ${totalN} tracked so far.` : ''}</div>
+    </div>
+    <table class="tbl"><tbody>
+      <tr style="color:var(--text3)">
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase">Sport</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:center">N</td>
+        <td style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;text-align:right">Avg CLV</td>
+      </tr>
+      ${body}
+    </tbody></table>
+  </div>`;
+}
+function render() {
+  const app = document.getElementById('app');
+  if (!app) return;
+
+  if (!st.keyReady && !st.offlineHistory) {
+    app.innerHTML = `
+    <div style="max-width:460px;margin:40px auto 0">
+      <div style="margin-bottom:28px">
+        <div style="font-size:30px;font-weight:500;letter-spacing:-1.5px;color:var(--text);margin-bottom:6px">em<span style="color:var(--accent)">BET</span></div>
+        <div style="font-size:13px;color:var(--text2)">Daily market-edge picks across active sports</div>
+      </div>
+      <div class="card">
+        <div style="font-weight:500;font-size:16px;margin-bottom:8px">Enter your Odds API key</div>
+        <p style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:16px">
+          Get a free key at
+          <a href="https://the-odds-api.com" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">the-odds-api.com</a>.
+          Scanning and close tracking use your Odds API quota. Your key is stored in this browser and sent only to The Odds API for requests.
+        </p>
+        <input id="key-inp" type="password" placeholder="Paste your key here"
+          style="width:100%;padding:9px 12px;border:0.5px solid var(--border-md);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--sans);margin-bottom:12px;box-sizing:border-box"
+          onkeydown="if(event.key==='Enter') EL.saveKey()"/>
+        <button class="btn" style="background:var(--accent-bg);border-color:var(--accent-border);color:var(--accent);font-weight:500" onclick="EL.saveKey()">Connect</button>
+        <button class="btn" onclick="EL.viewHistory()">View history / restore backup</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  if (st.settleId) {
+    const p = [...st.history,...st.pending].find(x => x && x.id === st.settleId);
+    if (!p) { st.settleId = null; render(); return; }
+    const cur = getRes(p.id) || '';
+    app.innerHTML = `
+    <div style="max-width:380px;margin:40px auto">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <span style="font-weight:500;font-size:16px">Settle pick</span>
+          <button style="background:none;border:none;cursor:pointer;color:var(--text2);font-size:22px;line-height:1;padding:0" onclick="EL.closeSettle()">×</button>
+        </div>
+        <div style="font-size:13px;font-weight:500;margin-bottom:3px">${esc(p.bet)}</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:18px">${esc(p.game)}</div>
+        <div style="display:flex;gap:8px">
+          ${['W','L','P','N'].map(r=>`<button class="rbtn${cur===r?' '+r:''}" onclick="EL.settle('${p.id}','${r}')">${r==='W'?'Win':r==='L'?'Loss':r==='N'?'No bet':'Push'}</button>`).join('')}
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:14px">
+          <button class="btn" onclick="EL.closeSettle()">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  const settled = st.history.filter(p => p.result);
+  const W   = settled.filter(p => p.result==='W').length;
+  const L   = settled.filter(p => p.result==='L').length;
+  const P   = settled.filter(p => p.result==='P').length;
+  const pnl = settled.reduce((s,p) => {
+    if (p.result==='W') return s + FLAT*(tD(p.line)-1);
+    if (p.result==='L') return s - FLAT;
+    return s;
+  }, 0);
+  const hasPF  = (W+L+P) > 0;
+  const pColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  // PHASE 0 (2.1 / 2.3): verified, de-duplicated observations only.
+  const clvSet = clvObservations();
+  const clvExcluded = clvExcludedCounts();
+  const clvValues = clvSet.map(p => cCLV(p.line, p.closingLine));
+  const avgClv = clvValues.length ? clvValues.reduce((a,b) => a+b, 0) / clvValues.length : null;
+  const clvSd  = avgClv != null ? stdev(clvValues, avgClv) : null;
+  const clvSE = eventClusterSE(clvSet, avgClv);
+
+  const STALE_UNSETTLED_MS = 14 * 24 * 60 * 60 * 1000;
+  const staleUnsettled = st.pending.filter(p => {
+    const gameOver = (Date.now() - new Date(p.commenceTime).getTime()) > STALE_UNSETTLED_MS;
+    return gameOver && !getRes(p.id);
+  });
+
+  const settleGroups = {};
+  for (const p of st.history) {
+    if (!['W','L','P'].includes(p.result)) continue;
+    const key = `${p.gameId}|${p.mkt}|${p.bet}`;
+    (settleGroups[key] ||= []).push(p);
+  }
+  const dupSettleGroups = Object.values(settleGroups).filter(g => g.length > 1);
+
+  const lastBackupAt = LS.get('embet_last_backup');
+  const hasTrackedData = st.history.length > 0 || st.pending.length > 0;
+  const backupAgeDays = lastBackupAt ? (Date.now() - new Date(lastBackupAt).getTime()) / 86400000 : Infinity;
+  const needsBackupReminder = hasTrackedData && backupAgeDays > 7;
+
+  const allHist = [...st.pending, ...st.history]
+    .sort((a,b) => {
+      const aSettled = !!getRes(a.id), bSettled = !!getRes(b.id);
+      const aPast = new Date(a.commenceTime) <= new Date(), bPast = new Date(b.commenceTime) <= new Date();
+      if (aPast && !aSettled && !(bPast && !bSettled)) return -1;
+      if (bPast && !bSettled && !(aPast && !aSettled)) return 1;
+      return Math.abs(new Date(a.commenceTime) - Date.now()) - Math.abs(new Date(b.commenceTime) - Date.now());
+    })
+    .slice(0, st.historyLimit || 20);
+
+  const histRows = allHist.map(p => {
+    const r   = getRes(p.id) || p.result;
+    const tag = r
+      ? `<button class="btn" style="padding:2px 8px;font-size:11px;border:none;background:none" onclick="EL.openSettle('${p.id}')">${bdg(r==='W'?'success':r==='L'?'danger':r==='N'?'neutral':'warning', r==='W'?'Win':r==='L'?'Loss':r==='N'?'No bet':'Push')}</button>`
+      : `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="EL.openSettle('${p.id}')">Settle</button>`;
+    const days = daysUntil(p.commenceTime);
+    const horizon = p.horizon === 'future'
+  ? bdg('warning', 'future')
+  : p.horizon === 'far'
+    ? bdg('danger', 'far')
+    : bdg('info', 'near');
+    const clv = isCapturedClose(p) ? cCLV(p.line, p.closingLine) : null;
+    const clvTag = clv != null
+      ? `<span class="mono" style="font-size:11px;font-weight:500;color:${clv>=0?'var(--green)':'var(--red)'}">${fCLV(clv)}</span>`
+      : p.closingLine != null
+      ? `<span style="font-size:11px;color:var(--text3)" title="Closing price not verified — excluded from CLV">unver.</span>`
+      : `<span style="font-size:11px;color:var(--text3)">—</span>`;
+    const edgeTag = typeof p.edge === 'number'
+      ? `<span class="mono" style="font-size:11px;color:var(--green)">${fGap(p.edge)}</span>`
+      : '';
+    const confTier = p.confMeta ? confidenceLabel(quantConfidence(p)).tier : null;
+    const confTag = confTier ? bdg('neutral', confTier) : '';
+    return `<tr>
+      <td style="font-size:11px;color:var(--text2);white-space:nowrap">${fDate(p.commenceTime)}</td>
+      <td>
+        <div style="font-size:12px;font-weight:500">${esc(p.bet)} <span style="color:var(--accent);font-weight:400">&middot; ${esc(p.book)}</span></div>
+        <div style="font-size:11px;color:var(--text2)">${esc(p.game)}</div>
+        <div style="margin-top:2px">${edgeTag} ${confTag}</div>
+      </td>
+      <td style="white-space:nowrap">
+        <span class="mono" style="font-size:12px">${fO(p.line)}</span>
+        &nbsp;${bdg('neutral', p.sport)}
+        &nbsp;${horizon}
+      </td>
+      <td>${clvTag}</td>
+      <td>${tag}</td>
+    </tr>`;
+  }).join('');
+
+  const errHint = st.err && (st.err.toLowerCase().includes('fetch') || st.err.toLowerCase().includes('network') || st.err.toLowerCase().includes('failed'))
+    ? `<div style="margin-top:10px;font-size:12px;color:var(--text2)">emBET requires direct network access to the-odds-api.com. If you're inside Claude's viewer, download the file and open it in your browser—or host it on GitHub Pages for a permanent shareable link.</div>`
+    : '';
+
+  const hasPicks = (st.picks?.near?.length || 0) > 0 || (st.picks?.future?.length || 0) > 0 || (st.picks?.far?.length || 0) > 0;
+  const refreshing = st.loading && !!st.picks;
+
+  app.innerHTML = `
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+    <div style="font-size:30px;font-weight:500;letter-spacing:-1.5px;color:var(--text)">em<span style="color:var(--accent)">BET</span></div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="font-size:12px;color:var(--text2)">${new Date().toLocaleDateString('en-US',{weekday:'short',month:'long',day:'numeric',year:'numeric'})}</div>
+      <button class="btn" style="font-size:11px;padding:3px 9px" ${refreshing?'disabled':''} onclick="EL.retry()">${refreshing?'Rescanning…':'Rescan'}</button>
+      <button class="btn" style="font-size:11px;padding:3px 9px" onclick="EL.toggleSettings()">${st.showSettings?'Close':'Settings'}</button>
+      <button class="btn" style="font-size:11px;padding:3px 9px" onclick="EL.changeKey()">Change key</button>
+    </div>
+  </div>
+  <div style="font-size:12px;color:var(--text3);margin-bottom:4px;min-height:18px">
+    ${st.picks
+      ? `Scanned at ${new Date(st.picks.generatedAt).toLocaleTimeString()} &middot; ${st.picks.total} plays with an edge found${(st.picks.hidden||0) > 0 ? ` (${st.picks.hidden} outside the windows shown below${(Math.max(st.picks.nearTruncated||0, st.picks.futureTruncated||0) > 0) ? ` &mdash; <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.showMore()">show more</span>` : ''})` : ''}${refreshing?' &middot; rescanning for newer lines&hellip;':''}`
+      : st.loading ? 'Scanning active lines&hellip;' : ''}
+  </div>
+  <div style="font-size:11px;color:var(--text3);margin-bottom:4px">
+    ${st.bankroll
+      ? `Bankroll: $${st.bankroll.toLocaleString()} &middot; <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">edit</span>`
+      : `No bankroll set &middot; <span style="color:var(--accent);cursor:pointer;text-decoration:underline" onclick="EL.setBankroll()">set one for stake-sizing suggestions</span>`}
+  </div>
+  <div style="font-size:11px;color:var(--text3);margin-bottom:22px">
+    <a href="https://the-odds-api.com/account/" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">Check API usage on your account page</a> — the API doesn't expose live quota numbers to a page running in a browser like this one.
+  </div>
+
+  ${st.showSettings ? `
+  <div class="card" style="margin-bottom:14px">
+    <div style="font-weight:500;font-size:14px;margin-bottom:14px">Settings</div>
+
+    <div style="margin-bottom:18px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-size:13px;font-weight:500">Minimum edge</span>
+        <span class="mono" style="font-size:13px;color:var(--accent)">${(minEdge()*100).toFixed(1)}pp</span>
+      </div>
+      <input type="range" min="${MIN_EDGE_FLOOR*1000}" max="${MIN_EDGE_CEIL*1000}" step="1" value="${Math.round(minEdge()*1000)}"
+        style="width:100%" oninput="EL.previewSetting('minEdge', this.value/1000)" onchange="EL.saveSetting('minEdge', this.value/1000)"/>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">How big a price disagreement a play needs before it's surfaced, in probability points — the book's implied probability versus the reference. Lower = more plays, more marginal. Higher = fewer, higher-conviction. There's no provably correct value — it's a volume-vs-quality dial. Default 1.5pp. <strong>This is now measured in probability points, not expected value.</strong> The old EV floor let a +300 longshot qualify on roughly a third of the price disagreement a −200 favorite needed, so at the same numeric setting you will see fewer plays, weighted less toward long prices.</div>
+    </div>
+
+    <div style="margin-bottom:18px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-size:13px;font-weight:500">Hide plays beyond a max price</span>
+        <label style="font-size:11px;color:var(--text2);display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" ${maxOddsCap()!=null?'checked':''} onchange="EL.toggleOddsCap(this.checked)"/> On
+        </label>
+      </div>
+      ${maxOddsCap()!=null ? `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:2px">
+        <span class="mono" style="font-size:13px;color:var(--accent)">+${maxOddsCap()}</span>
+      </div>
+      <input type="range" min="${MAX_ODDS_FLOOR}" max="${MAX_ODDS_CEIL}" step="50" value="${maxOddsCap()}"
+        style="width:100%" oninput="EL.previewSetting('maxOddsCap', parseInt(this.value,10))" onchange="EL.saveSetting('maxOddsCap', parseInt(this.value,10))"/>
+      ` : ''}
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">Off by default — every detected play is shown regardless of price. Turn on to hide long-shot plays beyond a price you choose (e.g. +1000). This only affects what's displayed as a recommended pick; the odds-band calibration table below keeps tracking real CLV data on the far end either way, so you can see whether long shots are actually worth including later.</div>
+    </div>
+
+    <div style="margin-bottom:18px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-size:13px;font-weight:500">Picks per window</span>
+        <span class="mono" style="font-size:13px;color:var(--accent)">${topN()}</span>
+      </div>
+      <input type="range" min="${TOP_N_FLOOR}" max="${TOP_N_CEIL}" step="1" value="${topN()}"
+        style="width:100%" oninput="EL.previewSetting('topN', parseInt(this.value,10))" onchange="EL.saveSetting('topN', parseInt(this.value,10))"/>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">How many top plays to show in each window (near / future). This changes the display only; the research cohort and AI finalist pool are tracked independently. Doesn't use extra API calls. Default 3.</div>
+    </div>
+
+    <div style="margin-top:18px;padding-top:16px;border-top:0.5px solid var(--border)">
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px">Layer 2 AI worker</div>
+      <input class="inp" id="worker-url-inp" type="text" placeholder="https://your-worker.username.workers.dev" value="${esc(getWorkerUrl())}"
+        style="width:100%;padding:8px 10px;border:0.5px solid var(--border-md);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--sans);box-sizing:border-box" onchange="EL.saveWorkerUrl(this.value)" />
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">Secure proxy used for Claude/GPT/Gemini/DeepSeek calls. Keep API keys in the worker, not in this HTML file.</div>
+      <input class="inp" id="worker-secret-inp" type="password" placeholder="Worker secret (EMBET_SECRET you set in Cloudflare)" value="${esc(LS.get('embet_worker_secret') || '')}"
+        style="width:100%;padding:8px 10px;border:0.5px solid var(--border-md);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--sans);box-sizing:border-box;margin-top:8px" oninput="EL.saveWorkerSecret(this.value)" />
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">
+        ${Object.values(MODELS).map(m => `<label style="font-size:11px;color:var(--text2);border:0.5px solid var(--border);border-radius:5px;padding:4px 7px;cursor:pointer"><input type="checkbox" ${getAiModels().includes(m.id)?'checked':''} onchange="EL.toggleAiModel('${m.id}', this.checked)"/> ${m.name}</label>`).join('')}
+      </div>
+    </div>
+
+    <div style="margin-top:16px;font-size:11px;color:var(--text3)">Quant settings take effect on the next rescan. The AI panel always chooses from exactly ${AI_FINALISTS} finalists. <button class="btn" style="font-size:11px;padding:3px 10px;margin-left:6px" onclick="EL.retry()">Rescan now</button></div>
+
+    <div style="margin-top:18px;padding-top:16px;border-top:0.5px solid var(--border)">
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px">Backup &amp; restore</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-bottom:10px">All tracked history, pending picks, and settings live only in this browser's storage — clearing site data, switching browsers, or an IT-managed device policy can erase them with no way to recover. emBET tries to download a backup automatically every 7 days when you open it, but browsers can block automatic downloads silently — treat the button below as the reliable way to be sure.${LS.get('embet_last_backup') ? ` Last backup: ${fDT(LS.get('embet_last_backup'))}.` : ' No backup has been taken yet.'}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn" style="font-size:12px" onclick="EL.exportBackup()">Download backup</button>
+        <label class="btn" style="font-size:12px;cursor:pointer">
+          Restore from backup
+          <input type="file" accept="application/json" style="display:none" onchange="EL.importBackup(this.files[0])" />
+        </label>
+      </div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:8px">The backup file does not include your Odds API key or AI worker secret — re-enter those after a restore if needed.</div>
+    </div>
+  </div>` : ''}
+
+${needsBackupReminder ? `
+  <div style="background:var(--amber-bg);color:var(--amber);border:0.5px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
+    <div style="font-weight:500;margin-bottom:6px;font-size:13px">${lastBackupAt ? `Last backup was ${Math.floor(backupAgeDays)} days ago` : 'No backup has ever been taken'}</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">All your tracked history lives only in this browser's storage. Clearing site data, switching browsers, or a device policy can erase it permanently with no way to recover it. emBET just tried to download a fresh backup automatically — if you didn't see a download happen, your browser likely blocked it silently. Use the button below to be sure.</div>
+    <button class="btn" style="font-size:12px" onclick="EL.exportBackup()">Download backup now</button>
+  </div>` : ''}
+
+  ${dupSettleGroups.length > 0 ? `
+  <div style="background:var(--red-bg);color:var(--red);border:0.5px solid var(--red-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
+    <div style="font-weight:500;margin-bottom:6px;font-size:13px">${dupSettleGroups.length} bet${dupSettleGroups.length===1?'':'s'} settled at multiple books — review needed</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Each row below is the same wager tracked at a different book. You can only have placed the bet at one of them — leave the one you actually bet as Win/Loss/Push, and mark the rest "No bet" so your W/L record and P&amp;L aren't counting the same bet multiple times. This doesn't touch any CLV or calibration data — only the group below matches your actual W/L record.</div>
+    ${dupSettleGroups.map(g => `<div style="padding:8px 0;border-top:0.5px solid var(--red-border)">
+      <div style="font-size:12px;font-weight:500;margin-bottom:4px">${esc(g[0].bet)} <span style="color:var(--text2);font-weight:400">&middot; ${esc(g[0].game)}</span></div>
+      ${g.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:3px 0">
+        <div style="font-size:11px;color:var(--text2)">${esc(p.book)} ${fO(p.line)} &middot; marked ${p.result==='W'?'Win':p.result==='L'?'Loss':'Push'}</div>
+        <button class="btn" style="font-size:11px;padding:2px 8px;white-space:nowrap" onclick="EL.settle('${p.id}','N')">Mark No bet</button>
+      </div>`).join('')}
+    </div>`).join('')}
+  </div>` : ''}
+
+${staleUnsettled.length > 0 ? `
+  <div style="background:var(--amber-bg);color:var(--amber);border:0.5px solid var(--amber-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
+    <div style="font-weight:500;margin-bottom:6px;font-size:13px">${staleUnsettled.length} pick${staleUnsettled.length===1?'':'s'} need${staleUnsettled.length===1?'s':''} attention</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">These games ended 14+ days ago and haven't been settled yet. If you placed the bet, mark it Win/Loss/Push so your track record stays accurate. If you didn't bet it, mark it "No bet" — CLV tracking isn't affected either way, this is just for your W/L record.</div>
+    ${staleUnsettled.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-top:0.5px solid var(--amber-border)">
+      <div style="font-size:12px"><strong>${esc(p.bet)}</strong> <span style="color:var(--text2)">&middot; ${esc(p.game)} &middot; ${fDate(p.commenceTime)}</span></div>
+      <button class="btn" style="font-size:11px;padding:3px 9px;white-space:nowrap" onclick="EL.openSettle('${p.id}')">Settle</button>
+    </div>`).join('')}
+  </div>` : ''}
+
+  ${st.err ?`
+  <div style="background:var(--red-bg);color:var(--red);border:0.5px solid var(--red-border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;line-height:1.6">
+    <div style="font-weight:500;margin-bottom:3px;font-size:13px">Could not fetch odds</div>
+    <div style="font-size:13px">${esc(st.err)}</div>
+    ${errHint}
+    <div style="margin-top:10px"><button class="btn" style="font-size:12px" onclick="EL.retry()">Try again</button></div>
+  </div>` : ''}
+
+  ${st.loading && !st.picks ? `
+  <div style="text-align:center;padding:80px 0;color:var(--text2)">
+    <div class="mono" style="font-size:20px;letter-spacing:6px;color:var(--text3);margin-bottom:16px">···</div>
+    <div style="font-size:13px">Scanning active lines for edge</div>
+  </div>` : ''}
+
+  ${!st.loading && !hasPicks && !st.err ? `
+  <div style="text-align:center;padding:80px 0;color:var(--text2)">
+    ${(st.picks?.sportsFailed?.length || 0) > 0 ? `
+    <div style="font-size:15px;font-weight:500;color:var(--amber);margin-bottom:8px">Scan incomplete</div>
+    <div style="font-size:13px;margin-bottom:16px">${st.picks.sportsFailed.length} of ${st.picks.sportsTried} sport requests failed during the last scan (status ${st.picks.sportsFailed.map(f=>f.status).join(', ')}), so this "no plays" result may just mean those sports were never checked — not that the board is actually quiet. Check your API usage page if this keeps happening.</div>
+    ` : (st.picks?.hidden || 0) > 0 ? `
+    <div style="font-size:15px;font-weight:500;color:var(--text);margin-bottom:8px">Nothing in the displayed windows</div>
+    <div style="font-size:13px;margin-bottom:16px">${st.picks.hidden} play${st.picks.hidden===1?'':'s'} cleared the ${(minEdge()*100).toFixed(1)}% edge floor this scan, but landed outside what's shown here.${(Math.max(st.picks.nearTruncated||0, st.picks.futureTruncated||0) > 0) ? ` At least ${Math.max(st.picks.nearTruncated||0, st.picks.futureTruncated||0)} of those were cut purely by the picks-per-window setting (currently ${topN()}) — raising it would surface them, not change what the scan actually found.` : ` These are further out than the display windows reach, or beyond the top few flagged sanity-cap items — raising picks-per-window won't bring these specific ones back.`}</div>
+    ` : `
+    <div style="font-size:15px;font-weight:500;color:var(--text);margin-bottom:8px">${st.picks ? 'No plays found' : 'History mode — no scan loaded'}</div>
+    <div style="font-size:13px;margin-bottom:16px">${!st.picks ? 'Your saved history is available below. Connect your Odds API key to scan current picks.' : `No plays at or above the ${(minEdge()*100).toFixed(1)}% edge floor as of the last scan${st.picks?` (${new Date(st.picks.generatedAt).toLocaleTimeString()})`:''}. All ${st.picks?.sportsTried||0} sport requests succeeded — this means the board was actually checked and found quiet, not that something failed silently. Lines move throughout the day, so this can change without you doing anything — rescan to check the current board.`}</div>
+    `}
+    <div style="display:flex;gap:8px;justify-content:center">
+      <button class="btn" onclick="EL.retry()">Rescan now</button>
+      ${(Math.max(st.picks?.nearTruncated||0, st.picks?.futureTruncated||0) > 0) ? `<button class="btn" style="background:var(--accent-bg);border-color:var(--accent-border);color:var(--accent)" onclick="EL.showMore()">Show all &amp; rescan</button>` : ''}
+    </div>
+  </div>` : ''}
+
+  ${hasPicks ? `<div class="section-divider">Bet within 3 days</div>` : ''}
+  ${(st.picks?.near?.length || 0) > 0
+    ? st.picks.near.map((p, i) => rCard(p, 'near', i === 0)).join('')
+    : hasPicks ? `<div class="empty-window">No plays with an edge for games in the next 72 hours.</div>` : ''}
+
+  ${hasPicks ? `<div class="section-divider">Further out — as far as books are posting</div>` : ''}
+  ${(st.picks?.future?.length || 0) > 0
+    ? st.picks.future.map(p => rCard(p, 'future')).join('')
+    : hasPicks ? `<div class="empty-window">No plays beyond the next 3 days. emBET only sees games the books are currently pricing — typically about a week out, so this section is usually thin and often empty.</div>` : ''}
+
+  ${(st.picks?.far?.length || 0) > 0 ? `
+  <div class="section-divider">Early lines — posted beyond 2 weeks out</div>
+  ${st.picks.far.map(p => rCard(p, 'far')).join('')}
+  ` : ''}
+
+  ${(st.picks?.flagged?.length || 0) > 0 ? `
+  <div class="section-divider">Flagged — not shown as picks</div>
+  ${st.picks.flagged.map(flagCard).join('')}
+  ` : ''}
+
+  ${hasPicks ? aiPanel() : ''}
+  ${layerComparisonPanel()}
+  ${leaderboardPanel()}
+
+  <div class="card" style="font-size:13px;line-height:1.8;margin-top:8px">
+    <div class="lbl" style="margin-bottom:6px">Track record since ${START}</div>
+    ${hasPF
+      ? `<span style="font-weight:500">${W}W &thinsp;&mdash;&thinsp; ${L}L${P>0?` &thinsp;&mdash;&thinsp; ${P}P`:''}</span>
+         &ensp;&middot;&ensp;
+         <span class="mono" style="font-weight:500;color:${pColor}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span>
+         <span style="color:var(--text2)"> at $${FLAT} flat</span>`
+      : `<span style="color:var(--text2)">No results recorded yet. Use Pick history to settle each pick after games finish.</span>`}
+    ${avgClv != null ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">Avg CLV across ${clvSet.length} pregame-proxy pick${clvSet.length===1?'':'s'}: <span class="mono" style="font-weight:500;color:${avgClv>=0?'var(--green)':'var(--red)'}">${fCLV(avgClv)}${clvSE!=null?` ± ${(clvSE*1.96*100).toFixed(1)}pp (approx. 95% interval)`:''}</span> — same-book price movement; the interval groups wagers by event.</div>` : ''}
+    <div style="margin-top:6px;font-size:11px;color:var(--text3)">${sampleNote(clvSet.length)}</div>
+    ${clvExcluded.total > 0 ? `<div style="margin-top:6px;font-size:11px;color:var(--text3);line-height:1.6">
+      ${clvExcluded.total} close${clvExcluded.total===1?'':'s'} excluded from CLV statistics (bet results are retained):${clvExcluded.legacy ? ` ${clvExcluded.legacy} recorded before emBET tracked whether a closing price was actually observed;` : ''}${clvExcluded.fallback ? ` ${clvExcluded.fallback} without a qualifying pregame observation;` : ''}${clvExcluded.duplicates ? ` ${clvExcluded.duplicates} duplicate${clvExcluded.duplicates===1?'':'s'} of the same wager at another book;` : ''}
+      their pregame timing cannot be verified, or they duplicate an already counted wager.
+    </div>` : ''}
+  </div>
+
+  ${clvSet.length > 0 ? calibrationCard() : ''}
+  ${clvSet.length > 0 ? oddsCalibrationCard() : ''}
+  ${clvSet.length > 0 ? confidenceCalibrationCard() : ''}
+  ${clvSet.length > 0 ? sportCalibrationCard() : ''}
+
+  ${allHist.length > 0 ? `
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer" onclick="EL.toggleHist()">
+      <span style="font-size:13px;font-weight:500">Pick history (${st.history.length} recorded · ${st.pending.length} pending)</span>
+      <button class="btn" style="font-size:11px;padding:3px 10px">${st.showHist?'Hide':'Show'}</button>
+    </div>
+    ${st.showHist ? `<div style="overflow-x:auto"><table class="tbl"><tbody>${histRows}</tbody></table></div>${allHist.length < st.history.length + st.pending.length ? `<button class="btn" style="margin:12px" onclick="EL.moreHistory()">Show more records</button>` : ''}` : ''}
+  </div>` : ''}
+  `;
+}
+window.EL = {
+  moreHistory() { st.historyLimit = (st.historyLimit || 20) + 50; render(); },
+  viewHistory() { st.offlineHistory = true; st.loading = false; render(); },
+  saveKey() {
+    const v = (document.getElementById('key-inp') || {}).value || '';
+    if (!v.trim()) return;
+    AK = v.trim();
+    LS.set('embet_ak', AK);
+    st.keyReady = true;
+    render();
+    scan();
+  },
+  changeKey() {
+    AK = '';
+    LS.set('embet_ak', '');
+    st.keyReady = false;
+    st.picks    = null;
+    st.loading  = false;
+    st.err      = '';
+    render();
+  },
+  openSettle(id)  { st.settleId = id; render(); },
+  closeSettle()   { st.settleId = null; render(); },
+  toggleHist()    { st.showHist = !st.showHist; render(); },
+  toggleSettings(){ st.showSettings = !st.showSettings; render(); },
+  saveWorkerSecret(v) {
+    LS.set('embet_worker_secret', v.trim());
+  },
+  saveWorkerUrl(v) {
+    LS.set('embet_worker_url', String(v || '').trim());
+    st.workerUrl = getWorkerUrl();
+    render();
+  },
+  toggleAiModel(id, checked) {
+    const cur = new Set(getAiModels());
+    if (checked) cur.add(id); else cur.delete(id);
+    const next = [...cur].filter(x => MODELS[x]);
+    LS.set('embet_ai_models', next);
+    st.aiModels = next;
+    render();
+  },
+  runAiPanel() {
+    const finalists = finalistPoolFromPicks(st.picks);
+    if (!finalists.length) return;
+    runAllModels(finalists, st.picks);
+  },
+  previewSetting(key, val) {
+    st.settings = { ...st.settings, [key]: val };
+  },
+  saveSetting(key, val) {
+    st.settings = { ...st.settings, [key]: val };
+    LS.set('embet_settings', st.settings);
+    render();
+  },
+  toggleOddsCap(checked) {
+    // Turning it on picks a sensible starting point (+1000, the exact
+    // number the person flagged as too aggressive) rather than defaulting
+    // to the slider's floor or ceiling; turning it off clears back to
+    // unlimited (null) rather than leaving a stale number saved but unused.
+    st.settings = { ...st.settings, maxOddsCap: checked ? 1000 : null };
+    LS.set('embet_settings', st.settings);
+    render();
+  },
+  retry()         { st.err = ''; st.loading = true; render(); scan(); },
+  showMore() {
+    const need = Math.max(st.picks?.nearTruncated || 0, st.picks?.futureTruncated || 0);
+    if (need <= 0) return;
+    const newTopN = CLAMP(topN() + need, TOP_N_FLOOR, TOP_N_CEIL);
+    st.settings = { ...st.settings, topN: newTopN };
+    LS.set('embet_settings', st.settings);
+    st.err = ''; st.loading = true; render(); scan();
+  },
+  setBankroll() {
+    const input = window.prompt('Bankroll for stake-sizing suggestions ($) — used only to calculate the suggested stake shown on each pick, stored only in this browser:', st.bankroll || '');
+    if (input == null) return;
+    const v = parseFloat(input);
+    if (!isFinite(v) || v <= 0) return;
+    st.bankroll = v;
+    LS.set('embet_bankroll', v);
+    render();
+  },
+  async settle(id, result) {
+    const pick = [...st.history, ...st.pending].find(p => p && p.id === id);
+    if (!pick) return;
+    const done = { ...pick, result, settledAt: new Date().toISOString() };
+    const i    = st.history.findIndex(h => h.id === id);
+    if (i >= 0) st.history[i] = done; else st.history.push(done);
+    st.pending = st.pending.filter(p => p.id !== id);
+    LS.set('embet_history', st.history);
+    LS.set('embet_pending', st.pending);
+    st.settleId = null;
+    render();
+  },
+  exportBackup() {
+    const backup = {
+      version: 4,
+      exportedAt: new Date().toISOString(),
+      embet_history:     LS.get('embet_history')     || [],
+      embet_pending:      LS.get('embet_pending')      || [],
+      embet_settings:      LS.get('embet_settings')      || {},
+      embet_bankroll:       LS.get('embet_bankroll')       ?? null,
+      embet_ai_models:       LS.get('embet_ai_models')       || DEFAULT_AI_MODELS,
+      embet_worker_url:       LS.get('embet_worker_url')       || '',
+      embet_model_perf:        LS.get('embet_model_perf')        || {},
+      embet_layer_batches:      LS.get('embet_layer_batches')      || [],
+      embet_schema_v2:           LS.get('embet_schema_v2')           || false,
+      embet_schema_v3:            LS.get('embet_schema_v3')            || false,
+      embet_schema_v4: LS.get('embet_schema_v4') || false
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `embet-backup-${today()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    LS.set('embet_last_backup', new Date().toISOString());
+    render();
+  },
+  importBackup(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      let data;
+      try {
+        data = JSON.parse(e.target.result);
+      } catch (err) {
+        window.alert('Could not read this file — it doesn\'t look like valid JSON.');
+        return;
+      }
+      if (!data || typeof data !== 'object' || !('embet_history' in data || 'embet_pending' in data)) {
+        window.alert('This doesn\'t look like an emBET backup file.');
+        return;
+      }
+      const ok = window.confirm('This will REPLACE your current history, pending picks, and settings with the contents of this backup file. This cannot be undone. Continue?');
+      if (!ok) return;
+      try { restoreBackupData(data); }
+      catch (err) { window.alert(`Backup was not restored: ${err.message}`); return; }
+      window.alert('Backup restored. Reloading now.');
+      window.location.reload();
+    };
+    reader.readAsText(file);
+  }
+};
+const MKT_KEY = { ML: 'h2h', Spread: 'spreads', Total: 'totals' };
+function persistRecords() {
+  LS.set('embet_pending', st.pending);
+  LS.set('embet_history', st.history);
+}
+function captureClosing(g) {
+  const now = Date.now(), start = Date.parse(g.commence_time);
+  if (!Number.isFinite(start)) return;
+  let changed = false;
+  for (const p of [...st.pending, ...st.history].filter(p => p.gameId === g.id)) {
+    // A schedule change invalidates the previously collected close evidence.
+    if (Date.parse(p.commenceTime) !== start) {
+      p.commenceTime = g.commence_time;
+      delete p.preClose;
+      if (p.closeSource === 'captured') p.closeSource = 'legacy';
+      changed = true;
+    }
+    if (now >= start || p.closingLine != null) continue;
+    const bm = g.bookmakers?.find(b => (b.title || b.key) === p.book);
+    const market = bm?.markets?.find(m => m.key === MKT_KEY[p.mkt]);
+    const out = market?.outcomes?.find(o => p.bet === `${o.name}${o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : ''}`);
+    const quoteAt = market?.last_update || bm?.last_update;
+    const qt = Date.parse(quoteAt);
+    if (!out || !validOdds(out.price) || !Number.isFinite(qt) || qt > now) continue;
+    p.latestLine = out.price;
+    p.latestLineAt = new Date(now).toISOString();
+    if (start - qt <= CLOSE_WINDOW_MS && (!p.preClose || qt >= Date.parse(p.preClose.quoteAt))) {
+      p.preClose = { method:'observed-pregame-v1', quoteAt,
+        observedAt:new Date(now).toISOString(), price:out.price,
+        gameId:p.gameId, mkt:p.mkt, bet:p.bet, book:p.book };
+    }
+    changed = true;
+  }
+  if (changed) persistRecords();
+}
+function finalizeStalePending() {
+  const now = Date.now();
+  let changed = false;
+  for (const p of [...st.pending, ...st.history]) {
+    if (p.closingLine != null) continue;
+    const start = Date.parse(p.commenceTime);
+    if (!Number.isFinite(start) || now < start) continue;
+    const candidate = { ...p, closingLine:p.preClose?.price,
+      closeSource:'captured', closeEvidence:p.preClose };
+    if (isCapturedClose(candidate)) {
+      p.closingLine = candidate.closingLine;
+      p.closeEvidence = { ...p.preClose };
+      p.closeSource = 'captured';
+    } else if (now - start >= FINALIZE_GRACE_MS) {
+      // Preserve the old fallback display, but never score it.
+      p.closingLine = p.latestLine ?? p.line;
+      p.closeSource = 'fallback';
+    } else continue;
+    p.closingAt = new Date(now).toISOString();
+    p.lineFinalized = true;
+    changed = true;
+  }
+  if (changed) persistRecords();
+}
+
+function mergePending(pick) {
+  if (!pick) return null;
+  const existing = [...st.pending, ...st.history].find(p =>
+    p.gameId === pick.gameId && p.mkt === pick.mkt && p.bet === pick.bet && p.book === pick.book);
+  if (existing) {
+    if (!existing.sportKey && pick.sportKey) existing.sportKey = pick.sportKey;
+    return { ...pick, id:existing.id, result:existing.result };
+  }
+  const entry = { ...pick, detectedAt:new Date().toISOString(), entrySchema:4,
+    latestLine:pick.line, latestLineAt:new Date().toISOString(),
+    closingLine:null, closingAt:null, closeSource:'none', lineFinalized:false };
+  st.pending.push(entry);
+  return { ...entry };
+}
+async function scan() {
+  if (!AK) { st.offlineHistory = false; st.loading = false; render(); return; }
+  if (st.scanning) return;
+  st.scanning = true;
+  try {
+    const sRes = await fetch(`${OB}/sports/?apiKey=${AK}`);
+    if (!sRes.ok) throw new Error(`Sports list error ${sRes.status}. Check the API key.`);
+    const allSports = await sRes.json();
+
+    const active = allSports.filter(s => s.active && !s.has_outrights);
+    const sorted = [
+      ...PRI.filter(k => active.find(s => s.key === k)),
+      ...active.filter(s => !PRI.includes(s.key)).map(s => s.key)
+    ].slice(0, 8);
+
+    const scannedGames = [];
+    const opps = [];
+    const failedSports = [];
+
+    for (const sport of sorted) {
+      const url = new URL(`${OB}/sports/${sport}/odds/`);
+      url.searchParams.set('apiKey',     AK);
+      url.searchParams.set('regions',    'us');
+      url.searchParams.set('markets',    'h2h,spreads,totals');
+      url.searchParams.set('oddsFormat', 'american');
+      url.searchParams.set('bookmakers',  BKS);
+
+      const res = await fetch(url.toString());
+      if (!res.ok) {
+        if (res.status === 429) throw new Error('API quota reached for this period.');
+        failedSports.push({ sport, status: res.status });
+        continue;
+      }
+
+      const games    = await res.json();
+      scannedGames.push(...games);
+      const now      = new Date();
+      const sportLbl = allSports.find(s => s.key === sport)?.title || sport;
+
+      for (const g of games) {
+        captureClosing(g);
+        if (new Date(g.commence_time) <= now) continue;
+
+        const pin = g.bookmakers.find(b => b.key === 'pinnacle');
+        const oKey = (name, point) => point != null ? `${name}|${point}` : name;
+
+        for (const mkt of ['h2h', 'spreads', 'totals']) {
+          const pm = pin?.markets?.find(m => m.key === mkt);
+          let fm = null, sharpRef = false;
+          const meta = {};
+
+          if (pm?.outcomes?.length === 2) {
+            const [a, b] = pm.outcomes;
+            const [fa, fb] = shinProb(iP(a.price), iP(b.price));
+            fm = { [oKey(a.name, a.point)]: fa, [oKey(b.name, b.point)]: fb };
+            sharpRef = true;
+            const sideKeys = [oKey(a.name, a.point), oKey(b.name, b.point)];
+            const soft = {};
+            for (const key of sideKeys) {
+              const ips = [];
+              for (const bm of g.bookmakers) {
+                if (bm.key === 'pinnacle') continue;
+                const m2 = bm.markets?.find(m => m.key === mkt);
+                const o2 = m2?.outcomes?.find(o => oKey(o.name, o.point) === key);
+                if (o2 && o2.price != null) ips.push(iP(o2.price));
+              }
+              const mean = ips.length ? ips.reduce((s,x)=>s+x,0)/ips.length : null;
+              const disp = (ips.length >= 2 && mean != null) ? Math.sqrt(ips.reduce((s,x)=>s+(x-mean)**2,0)/(ips.length-1)) : null;
+              soft[key] = { ips, mean, disp };
+            }
+            // De-vig the soft consensus so it is comparable with the de-vigged
+            // Pinnacle number. Comparing a de-vigged value against a vigged one
+            // just measures the margin, which is what the old pinAlign did.
+            let consProb = {};
+            const mA = soft[sideKeys[0]].mean, mB = soft[sideKeys[1]].mean;
+            if (mA != null && mB != null && mA + mB > 1 && mA > 0 && mB > 0) {
+              const [cA, cB] = shinProb(mA, mB);
+              consProb = { [sideKeys[0]]: cA, [sideKeys[1]]: cB };
+            }
+            for (const key of sideKeys) {
+              meta[key] = { nBooks: soft[key].ips.length, disp: soft[key].disp,
+                            pinProb: key === sideKeys[0] ? iP(a.price) : iP(b.price),
+                            consProb: consProb[key] ?? null };
+            }
+          } else {
+            const pools = {};
+            for (const bm of g.bookmakers) {
+              const m2 = bm.markets?.find(m => m.key === mkt);
+              if (!m2?.outcomes || m2.outcomes.length !== 2) continue;
+              for (const o of m2.outcomes) {
+                const k = oKey(o.name, o.point);
+                if (!pools[k]) pools[k] = { point: o.point, prices: [] };
+                pools[k].prices.push(o.price);
+              }
+            }
+            const byPoint = {};
+            for (const k in pools) {
+              const pk = String(mkt === 'spreads' ? Math.abs(pools[k].point) : pools[k].point);
+              (byPoint[pk] ||= []).push(k);
+            }
+            let bestKeys = null, bestCount = 0;
+            for (const pk in byPoint) {
+              const keys = byPoint[pk];
+              if (keys.length !== 2) continue;
+              if (mkt === 'spreads' && (pools[keys[0]].point !== -pools[keys[1]].point || keys[0].split('|')[0] === keys[1].split('|')[0])) continue;
+              const count = keys.reduce((s, k) => s + pools[k].prices.length, 0);
+              if (count > bestCount) { bestCount = count; bestKeys = keys; }
+            }
+            if (bestKeys) {
+              const [k1, k2] = bestKeys;
+              if (pools[k1].prices.length >= MIN_CB && pools[k2].prices.length >= MIN_CB) {
+                const pA = robustProb(pools[k1].prices);
+                const pB = robustProb(pools[k2].prices);
+                if (pA != null && pB != null) {
+                  const [sA, sB] = shinProb(pA, pB);
+                  fm = { [k1]: sA, [k2]: sB };
+                  for (const key of [k1, k2]) {
+                    const ips = pools[key].prices.map(iP);
+                    const mean = ips.reduce((s,x)=>s+x,0)/ips.length;
+                    const disp = ips.length >= 2 ? Math.sqrt(ips.reduce((s,x)=>s+(x-mean)**2,0)/(ips.length-1)) : null;
+                    meta[key] = { nBooks: ips.length, disp, pinProb: null };
+                  }
+                }
+              }
+            }
+          }
+
+          if (!fm) continue;
+
+          for (const bm of g.bookmakers) {
+            if (bm.key === 'pinnacle') continue;
+            const m = bm.markets?.find(m => m.key === mkt);
+            if (!m?.outcomes) continue;
+
+            for (const o of m.outcomes) {
+              const fair = fm[oKey(o.name, o.point)];
+              if (!Number.isFinite(fair) || fair <= 0 || fair >= 1 || !validOdds(o.price)) continue;
+              // PHASE 0 (2.4): cEV() reduces algebraically to
+              //   fair*d - 1 = (fair - 1/d) * d = probability gap x decimal odds
+              // so a fixed EV floor admitted wildly different amounts of real
+              // market disagreement depending on price: a -200 favorite needed
+              // a 1.00pp gap to clear 1.5%, a +300 longshot only 0.38pp. That
+              // is the structural longshot bias the maxOddsCap display filter
+              // was papering over. It also made the edge-calibration table
+              // incoherent, since cCLV() is measured in probability points
+              // while edge was an EV fraction.
+              //
+              // Filter, rank and bucket on the probability gap -- the same unit
+              // as CLV. EV is retained for stake sizing, where it belongs.
+              const edgeProb = fair - iP(o.price);
+              const edgeEV   = cEV(fair, o.price);
+              if (edgeProb < minEdge()) continue;
+
+              const mktLbl = mkt === 'h2h' ? 'ML' : mkt === 'spreads' ? 'Spread' : 'Total';
+              const pt     = o.point != null ? ` (${o.point > 0 ? '+' : ''}${o.point})` : '';
+
+              const oppKey = oKey(o.name, o.point);
+              const base = {
+                id:           uid(),
+                gameId:       g.id,
+                sport:        sportLbl,
+                sportKey:     sport,
+                game:         `${g.away_team} @ ${g.home_team}`,
+                commenceTime: g.commence_time,
+                mkt:          mktLbl,
+                bet:          `${o.name}${pt}`,
+                book:         bm.title || bm.key,
+                line:         o.price,
+                fairOdds:     tA(1 / fair),
+                fairProb:     fair,
+                edge:         edgeProb,   // primary unit: probability points
+                edgeProb,
+                edgeEV,                   // retained for stake sizing / analysis
+                sharp:        sharpRef,
+                pinnacleDeep: PINNACLE_DEEP.has(sport),
+                suspicious:   edgeProb > SANITY_EDGE,
+                confMeta:     meta[oppKey] || { nBooks: null, disp: null, pinProb: null, consProb: null },
+                confVersion:  2,
+                closingLine:  null,
+                closingAt:    null,
+                closeSource:  'none',
+                result:       null
+              };
+              base.confidence = quantConfidence(base).score;
+              opps.push(base);
+            }
+          }
+        }
+      }
+    }
+
+    const rankScore = o => {
+      const edgeNorm = CLAMP(o.edge / SANITY_EDGE, 0, 1);
+      const c = (o.confidence != null) ? o.confidence : 0.5;
+      return 0.60*edgeNorm + 0.40*c;
+    };
+    opps.sort((a, b) => rankScore(b) - rankScore(a));
+
+    const now     = Date.now();
+    const cut72h  = now + H72;
+    const cutFar  = now + HFAR;
+
+    const passesOddsCap = o => {
+      const cap = maxOddsCap();
+      return cap == null || Math.abs(o.line) <= cap;
+    };
+    const nearOpps   = opps.filter(o => !o.suspicious && passesOddsCap(o) && new Date(o.commenceTime).getTime() <= cut72h);
+    const futureOpps = opps.filter(o => {
+      if (o.suspicious || !passesOddsCap(o)) return false;
+      const t = new Date(o.commenceTime).getTime();
+      return t > cut72h && t <= cutFar;
+    });
+    const flaggedAll = opps.filter(o => o.suspicious);
+    const flagged = flaggedAll.slice(0, 3);
+    const farOpps = opps.filter(o => !o.suspicious && passesOddsCap(o) && new Date(o.commenceTime).getTime() > cutFar);
+    // Plays that exist but are hidden purely by the odds cap -- tracked
+    // separately so the "N found, M shown" messaging can be honest about
+    // why, the same way it already is for topN truncation.
+    const oddsCappedCount = opps.filter(o => !o.suspicious && !passesOddsCap(o)).length;
+
+    // Track the full non-suspicious research cohort independently of display limits.
+    const tracked = new Map(opps.filter(o => !o.suspicious).map(o => {
+      const p = mergePending(o); return [o.id, p];
+    }));
+    const researchFinalists = finalistPoolFromPicks({researchFinalists:
+      [...nearOpps,...futureOpps].map(o => tracked.get(o.id))});
+    const near = nearOpps
+      .slice(0, topN())
+      .map(o => ({...tracked.get(o.id), horizon:'near'}));
+    const future = futureOpps
+      .slice(0, topN())
+      .map(o => ({...tracked.get(o.id), horizon:'future'}));
+    LS.set('embet_pending', st.pending);
+
+    const nearTruncated   = Math.max(0, nearOpps.length - near.length);
+    const futureTruncated = Math.max(0, futureOpps.length - future.length);
+    const far = farOpps
+      .slice(0, topN())
+      .map(o => ({...tracked.get(o.id), horizon:'far'}));
+    persistRecords();
+    const farTruncated = Math.max(0, farOpps.length - far.length);
+    const hiddenCount = farTruncated
+      + Math.max(0, flaggedAll.length - flagged.length)
+      + nearTruncated
+      + futureTruncated
+      + oddsCappedCount;
+
+    const picks = {
+      date:        today(),
+      generatedAt: new Date().toISOString(),
+      opportunities: [...tracked.values()],
+      researchFinalists,
+      near,
+      future,
+      far,
+      flagged,
+      total:        opps.length,
+      sportsTried:  sorted.length,
+      sportsFailed: failedSports,
+      hidden:       hiddenCount,
+      nearTruncated,
+      futureTruncated,
+      farTruncated
+    };
+
+    st.picks = picks;
+    LS.set(PICKS_KEY(), picks);
+
+    scannedGames.forEach(captureClosing);
+    finalizeStalePending();
+
+    const aiFinalists = finalistPoolFromPicks(picks);
+    if (getWorkerUrl() && aiFinalists.length) {
+      await runAllModels(aiFinalists, picks);
+    }
+
+  } catch (e) {
+    st.err = e.message || 'Failed to fetch odds.';
+  }
+
+  st.scanning = false;
+  st.loading = false;
+  render();
+}
+function migrateSchemaV2() {
+  if (LS.get('embet_schema_v2')) return;
+  const now = Date.now();
+  const fix = arr => (arr || []).map(p => {
+    if (!p) return p;
+    if (p.latestLine == null) p.latestLine = p.line;
+    if (p.latestLineAt == null) p.latestLineAt = p.closingAt || null;
+    if (p.closingLine != null) {
+      const gameHasHappened = !isNaN(new Date(p.commenceTime).getTime()) && new Date(p.commenceTime).getTime() <= now;
+      const commence = new Date(p.commenceTime).getTime();
+      const closedAt = p.closingAt ? new Date(p.closingAt).getTime() : null;
+      const strictlyProvenFinal = closedAt != null && !isNaN(commence) && closedAt >= commence;
+      if (strictlyProvenFinal || gameHasHappened) {
+        p.lineFinalized = true;
+      } else {
+        p.latestLine    = p.closingLine;
+        p.latestLineAt  = p.closingAt || p.latestLineAt;
+        p.closingLine   = null;
+        p.closingAt     = null;
+        p.lineFinalized = false;
+      }
+    } else {
+      p.lineFinalized = false;
+    }
+    return p;
+  });
+  st.pending = fix(st.pending);
+  st.history = fix(st.history);
+  LS.set('embet_pending', st.pending);
+  LS.set('embet_history', st.history);
+  LS.set('embet_schema_v2', true);
+}
+// ---------------------------------------------------------------------------
+// PHASE 0 -- schema v3 migration
+//
+// Runs once, after migrateSchemaV2(), over whatever is already in localStorage.
+// Two things change shape, and both are handled without discarding data:
+//
+// 1. Edge units. Pre-patch `edge` held an EV fraction. fairProb and line were
+//    both already persisted on every record, so the probability gap is
+//    recomputed exactly rather than approximated. Records old enough to
+//    predate fairProb get edge = null and simply drop out of the edge-bucket
+//    table; they remain in every other table.
+//
+// 2. Closing-line provenance. Pre-patch, a genuine capture and a fabricated
+//    fallback were written identically -- closingAt = now, lineFinalized =
+//    true, no other marker -- so old rows genuinely cannot be told apart after
+//    the fact. Rather than guess, they are marked 'legacy' and excluded from
+//    CLV statistics. Nothing is deleted; the rows stay visible in Pick history
+//    and can be re-admitted later if a rule for classifying them is found.
+//
+// The same reasoning applies to embet_model_perf, whose locked clv_pp values
+// were written by the old fallback path.
+// ---------------------------------------------------------------------------
+function migrateSchemaV3() {
+  if (LS.get('embet_schema_v3')) return;
+
+  const fix = arr => (arr || []).map(p => {
+    if (!p) return p;
+    if (p.edgeProb === undefined) {
+      p.edgeEV   = typeof p.edge === 'number' ? p.edge : null;
+      p.edgeProb = (typeof p.fairProb === 'number' && typeof p.line === 'number')
+        ? p.fairProb - iP(p.line)
+        : null;
+      p.edge = p.edgeProb;
+    }
+    if (p.closeSource === undefined) {
+      p.closeSource = p.closingLine == null ? 'none' : 'legacy';
+    }
+    return p;
+  });
+
+  st.pending = fix(st.pending);
+  st.history = fix(st.history);
+  LS.set('embet_pending', st.pending);
+  LS.set('embet_history', st.history);
+
+  const perf = LS.get('embet_model_perf') || {};
+  let perfChanged = false;
+  for (const id in perf) {
+    for (const rec of (perf[id]?.picks || [])) {
+      if (rec.legacy === undefined) { rec.legacy = !!rec.clvLocked; perfChanged = true; }
+    }
+  }
+  if (perfChanged) LS.set('embet_model_perf', perf);
+
+  LS.set('embet_schema_v3', true);
+}
+function restoreBackupData(data) {
+  for (const key of ['embet_history','embet_pending']) {
+    if (data[key] !== undefined && (!Array.isArray(data[key]) || data[key].some(p =>
+      !p || typeof p !== 'object' || typeof p.id !== 'string' || !validOdds(p.line) ||
+      !Number.isFinite(Date.parse(p.commenceTime)) || ![null,undefined,'W','L','P','N'].includes(p.result))))
+      throw new Error(`Invalid ${key}; original data left unchanged.`);
+  }
+  if (data.embet_layer_batches != null && !Array.isArray(data.embet_layer_batches)) throw new Error('Invalid batch log');
+  for (const key of ['embet_settings','embet_model_perf']) if (data[key] != null &&
+    (typeof data[key] !== 'object' || Array.isArray(data[key]))) throw new Error(`Invalid ${key}`);
+  for (const m of Object.values(data.embet_model_perf || {})) {
+    if (!m || !Array.isArray(m.picks) || m.picks.some(r => !r || typeof r !== 'object')) throw new Error('Invalid model records');
+  }
+  for (const b of data.embet_layer_batches || []) if (!b || typeof b !== 'object' ||
+    (b.schemaVersion === 4 && (!Array.isArray(b.candidates) || !Number.isFinite(Date.parse(b.requestedAt))))) throw new Error('Invalid research batch');
+  const settings = data.embet_settings || {};
+  for (const [k,lo,hi] of [['minEdge',MIN_EDGE_FLOOR,MIN_EDGE_CEIL],['topN',TOP_N_FLOOR,TOP_N_CEIL],['maxOddsCap',MAX_ODDS_FLOOR,MAX_ODDS_CEIL]]) {
+    if (settings[k] != null && (!Number.isFinite(settings[k]) || settings[k] < lo || settings[k] > hi)) throw new Error(`Invalid setting: ${k}`);
+  }
+  const values = {
+    embet_history:data.embet_history ?? [], embet_pending:data.embet_pending ?? [],
+    embet_settings:data.embet_settings ?? {}, embet_bankroll:data.embet_bankroll ?? null,
+    embet_model_perf:data.embet_model_perf ?? {}, embet_layer_batches:data.embet_layer_batches ?? [],
+    embet_ai_models:data.embet_ai_models ?? DEFAULT_AI_MODELS,
+    embet_schema_v2:false,embet_schema_v3:false,embet_schema_v4:false
+  };
+  if (data.embet_worker_url && /^https:\/\//i.test(data.embet_worker_url)) values.embet_worker_url = data.embet_worker_url;
+  if (!Array.isArray(values.embet_ai_models)) throw new Error('Invalid model selection');
+  const keys = [...new Set([...Object.keys(values),...Object.keys(localStorage).filter(k => k.startsWith('embet_picks_'))])];
+  const old = Object.fromEntries(keys.map(k => [k,localStorage.getItem(k)]));
+  try {
+    // Retain one recoverable pre-import dataset before replacing anything.
+    localStorage.setItem('embet_before_import',JSON.stringify(old));
+    for (const k of keys) {
+      if (k in values) localStorage.setItem(k,JSON.stringify(values[k]));
+      else localStorage.removeItem(k);
+      delete mem[k];
+    }
+  } catch (err) {
+    for (const k of keys) { try { old[k] == null ? localStorage.removeItem(k) : localStorage.setItem(k,old[k]); } catch {} }
+    throw new Error('Browser storage could not save the import. Keep your backup file and free storage before retrying.');
+  }
+}
+
+function migrateSchemaV4() {
+  for (const p of [...st.pending,...st.history]) {
+    if (p.entrySchema !== 4) {
+      if (!p.legacyEntry) p.legacyEntry = {fairProb:p.fairProb,edge:p.edge,edgeEV:p.edgeEV,edgeProb:p.edgeProb,confidence:p.confidence};
+      p.entrySchema = 3; // original entry features cannot be proven immutable
+      if (p.closeSource === 'captured') p.closeSource = 'legacy';
+      if (p.closeSource == null) p.closeSource = p.closingLine == null ? 'none' : 'legacy';
+    }
+    if (Number.isFinite(p.fairProb) && validOdds(p.line)) {
+      p.edgeProb = p.fairProb - iP(p.line); p.edgeEV = cEV(p.fairProb,p.line); p.edge = p.edgeProb;
+    } else { p.edgeProb = null; p.edgeEV = null; p.edge = null; }
+  }
+  persistRecords();
+  LS.set('embet_schema_v4',true);
+}
+
+let closeMaintenanceBusy = false;
+async function maintainCloses() {
+  if (!AK || closeMaintenanceBusy || st.scanning) return;
+  closeMaintenanceBusy = true;
+  try {
+    const now = Date.now();
+    const due = [...st.pending,...st.history].filter(p => p.closingLine == null &&
+      Date.parse(p.commenceTime) > now && Date.parse(p.commenceTime) - now <= 10*60*1000);
+    // Resolve legacy sport labels once, without truncating to discovery's eight sports.
+    let sports = [];
+    if (due.some(p => !p.sportKey)) {
+      const r = await fetch(`${OB}/sports/?all=true&apiKey=${AK}`);
+      if (!r.ok) throw new Error(`Close tracking: sports request ${r.status}`);
+      sports = await r.json();
+    }
+    for (const p of due) if (!p.sportKey) p.sportKey = sports.find(s => s.title === p.sport)?.key;
+    const grouped = new Map();
+    for (const p of due) if (p.sportKey) {
+      if (!grouped.has(p.sportKey)) grouped.set(p.sportKey,new Set());
+      grouped.get(p.sportKey).add(p.gameId);
+    }
+    for (const [sport, ids] of grouped) {
+      const url = new URL(`${OB}/sports/${sport}/odds/`);
+      for (const [k,v] of Object.entries({apiKey:AK,bookmakers:BKS,markets:'h2h,spreads,totals',oddsFormat:'american',eventIds:[...ids].join(',')})) url.searchParams.set(k,v);
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`Close tracking request ${r.status}; will retry while the app is open.`);
+      (await r.json()).forEach(captureClosing);
+    }
+    persistRecords();
+  } catch (e) { st.err = e.message; }
+  finally { finalizeStalePending(); closeMaintenanceBusy = false; render(); }
+}
+
+function maybeAutoBackup() {
+  const lastBackupAt = LS.get('embet_last_backup');
+  const hasData = st.history.length > 0 || st.pending.length > 0;
+  const ageDays = lastBackupAt ? (Date.now() - new Date(lastBackupAt).getTime()) / 86400000 : Infinity;
+  if (hasData && ageDays >= 7) {
+    try { window.EL.exportBackup(); } catch (e) { /* banner reminder still covers this */ }
+  }
+}
+function init() {
+  const h = LS.get('embet_history');
+  if (h) st.history = h;
+
+  const pend = LS.get('embet_pending');
+if (pend) st.pending = pend;
+
+  migrateSchemaV2();
+  migrateSchemaV3();
+  migrateSchemaV4();
+  // PHASE 0 (2.2): finalizeStalePending() used to run HERE, before scan().
+  // captureClosing() only processes picks where closingLine == null, so the
+  // fallback locked in an unverifiable value moments before the network call
+  // that would have fetched the real one -- guaranteeing the fabricated close
+  // won every time. scan() already calls finalizeStalePending() after the scan
+  // loop (correctly placed), so this call is simply removed rather than moved.
+  maybeAutoBackup();
+
+  const br = LS.get('embet_bankroll');
+  if (br) st.bankroll = br;
+
+  const settings = LS.get('embet_settings');
+  if (settings) st.settings = settings;
+
+  st.workerUrl = getWorkerUrl();
+  st.aiModels = getAiModels();
+
+  const savedKey = LS.get('embet_ak');
+  if (savedKey) {
+    AK          = savedKey;
+    st.keyReady = true;
+  }
+
+  if (!AK) {
+    st.offlineHistory = st.history.length > 0 || st.pending.length > 0;
+    st.loading = false;
+    render();
+    return;
+  }
+
+  maintainCloses();
+  const cached = LS.get(PICKS_KEY());
+  if (cached && 'near' in cached) {
+    const toArr = v => Array.isArray(v) ? v : (v ? [v] : []);
+    st.picks = { ...cached, near: toArr(cached.near), future: toArr(cached.future), flagged: cached.flagged || [] };
+    st.loading = false;
+    const age  = Date.now() - new Date(cached.generatedAt).getTime();
+    if (age > STALE_MS) {
+      st.loading = true;
+      render();
+      scan();
+    } else {
+      render();
+    }
+  } else {
+    render();
+    scan();
+  }
+}
+
+// Presentation state is separate from the repaired market and record engine.
+const ui = {page:'today',detailId:null,search:'',sport:'all',market:'all',sort:'rank',tracker:'pending',limit:30};
+const attribute = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+const action = (fn,...args) => attribute(`EL.${fn}(${args.map(x=>JSON.stringify(x)).join(',')})`);
+const originalRender = render;
+Object.assign(window.EL, {
+  navigate(page) { ui.page=page;ui.detailId=null;ui.limit=30;ui.search='';st.settleId=null;st.showSettings=false;render();document.getElementById('workspace-title')?.focus(); },
+  detail(id) {ui.detailFrom=ui.page;ui.detailId=id;ui.page='detail';render();document.getElementById('workspace-title')?.focus();},
+  filter(key,value) {ui[key]=value;ui.limit=30;render();},
+  loadMore() {ui.limit+=50;render();},
+  toggleSettings() {this.navigate('settings');},
+  viewHistory() {this.navigate('tracker');},
+  changeKey() {this.navigate('settings');},
+  rescan() {if(!AK){this.navigate('settings');return;}this.retry();}
+});
+function currentOpportunities() {
+  const source = st.picks?.opportunities || [...(st.picks?.near||[]),...(st.picks?.future||[]),...(st.picks?.far||[]),...(st.picks?.researchFinalists||[])];
+  const seen = new Set();
+  return source.filter(p=>p && Date.parse(p.commenceTime)>Date.now() && !seen.has(p.id) && seen.add(p.id)).sort((a,b)=>pickRankScore(b)-pickRankScore(a));
+}
+function recordSummary() {
+  const placed=st.history.filter(p=>['W','L','P'].includes(p.result));
+  return {placed,w:placed.filter(p=>p.result==='W').length,l:placed.filter(p=>p.result==='L').length,
+    pnl:placed.reduce((s,p)=>s+(p.result==='W'?FLAT*(tD(p.line)-1):p.result==='L'?-FLAT:0),0),
+    pending:st.pending.length,closes:clvObservations()};
+}
+function money(n) {return `${n>=0?'+':'−'}$${Math.abs(n).toFixed(2)}`;}
+function summaryCards() {
+ const d=recordSummary();
+ return `<div class="stats"><div class="stat"><div class="label">Recorded results</div><div class="value">${d.w}<span class="quiet"> W</span> · ${d.l}<span class="quiet"> L</span></div><small>${money(d.pnl)} at $${FLAT} flat per recorded bet</small></div><div class="stat"><div class="label">Tracked & pending</div><div class="value">${d.pending}</div><small>Opportunities awaiting a result or No bet</small></div><div class="stat"><div class="label">Eligible pregame closes</div><div class="value">${d.closes.length}</div><small>Unique wagers with timestamped evidence</small></div></div>`;
+}
+function opportunityRows(rows) {
+ return rows.map((p,i)=>`<article class="opportunity"><div class="rank">${String(i+1).padStart(2,'0')}</div><div><h3>${esc(p.bet)}</h3><p>${esc(p.game)}</p><p>${esc(p.book)} · <span class="number">${fO(p.line)}</span> · ${esc(fDT(p.commenceTime))}</p><span class="tag">${esc(p.sport)}</span><span class="tag">${esc(p.mkt)}</span></div><div style="text-align:right"><div class="gap">${fGap(p.edge)}</div><button class="textbutton" onclick="${action('detail',p.id)}">View details →</button></div></article>`).join('');
+}
+function emptyState(title,message,button='Scan markets',fn='rescan') {return `<div class="empty"><strong>${esc(title)}</strong>${esc(message)}<div style="margin-top:14px"><button class="button" onclick="${action(fn)}">${esc(button)}</button></div></div>`;}
+function todayView() {
+ const rows=currentOpportunities().filter(p=>Date.parse(p.commenceTime)<=Date.now()+H72 && (maxOddsCap()==null || Math.abs(p.line)<=maxOddsCap())).slice(0,topN());const d=recordSummary();
+ return summaryCards()+`<div class="split"><section class="panel"><div class="panel-head"><div><h2>Leading opportunities</h2><p>Next 72 hours · ranked by gap and confidence</p></div><button class="textbutton" onclick="${action('navigate','scanner')}">View scanner →</button></div>${rows.length?opportunityRows(rows):emptyState(st.loading?'Checking the markets…':!st.picks?'Your next scan starts here':'No upcoming opportunities',!AK?'Connect your Odds API key in Settings. Your saved records are available without a connection.':'Scan to find current price disagreements. Existing bets remain in your Tracker.')}</section><aside><section class="panel"><h2>Your workspace</h2><div class="aside-line"><span>Pending records</span><strong>${d.pending}</strong></div><div class="aside-line"><span>Saved history</span><strong>${st.history.length}</strong></div><div class="aside-line"><span>AI connection</span><strong>${getWorkerUrl()?'Configured':'Not set'}</strong></div><button class="textbutton" onclick="${action('navigate','tracker')}">Review tracker →</button></section><section class="panel"><h2>Close capture</h2><p class="quiet">${window.EmbetSync && localStorage.getItem('embet_sync_url') ? 'Collected automatically by your Worker every few minutes before kickoff, whether or not this page is open. Quotes timestamped within 30 minutes of the scheduled start qualify, and the age of each is recorded.' : 'Not configured. This page collects closes only while it is open near kickoff, and only quotes timestamped within five minutes of the start qualify. Set up Device sync in Settings for automatic collection.'}</p><p class="quiet">Missed or unverified closes never enter CLV. Your recorded bets and results are unaffected either way.</p><button class="textbutton" onclick="${action('navigate','performance')}">View the evidence &rarr;</button></section></aside></div>`;
+}
+function renderRedesign() {
+ const app=document.getElementById('app');if(!app)return;
+ if(st.settleId){st.offlineHistory=true;originalRender();return;}
+ const names={today:'Today',scanner:'Market Scanner',detail:'Opportunity Detail',tracker:'Tracker',performance:'Performance',ai:'AI Panel',settings:'Settings'};
+ const nav=[['today','Today'],['scanner','Scanner'],['tracker','Tracker'],['performance','Performance'],['ai','AI Panel'],['settings','Settings']];
+ const pageContent=ui.page==='today'?todayView():typeof routeView==='function'?routeView(ui.page):todayView();
+ app.innerHTML=`<a class="skip" href="#workspace-title">Skip to content</a><div class="shell"><aside class="rail"><div class="brand">emBET<small>Market intelligence</small></div><nav class="nav" aria-label="Main navigation">${nav.map(([k,v])=>`<button aria-current="${ui.page===k?'page':'false'}" onclick="${action('navigate',k)}">${v}</button>`).join('')}</nav><div class="rail-foot"><span class="rail-dot"></span>Personal workspace<br>Records saved in this browser</div></aside><main class="workspace"><header class="topbar"><div><div class="eyebrow">${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div><h1 id="workspace-title" tabindex="-1">${names[ui.page]||'Today'}</h1><p class="sub">${st.picks?.generatedAt?`Last scan ${esc(fDT(st.picks.generatedAt))}`:'Your records, research and market opportunities.'}</p></div><button class="button primary" onclick="${action('rescan')}" ${st.scanning?'disabled':''}>${st.scanning?'Scanning…':AK?'Scan markets':'Connect API'}</button></header>${st.err?`<div class="notice error" role="alert">${esc(st.err)}</div>`:''}${pageContent}</main></div>`;
+}
+render=renderRedesign;
+function filteredOpportunities() {
+ const query=ui.search.trim().toLowerCase();
+ const rows=currentOpportunities().filter(p=>(ui.sport==='all'||p.sport===ui.sport)&&(ui.market==='all'||p.mkt===ui.market)&&(!query||`${p.bet} ${p.game} ${p.book}`.toLowerCase().includes(query)));
+ return rows.sort((a,b)=>ui.sort==='time'?Date.parse(a.commenceTime)-Date.parse(b.commenceTime):ui.sort==='gap'?b.edge-a.edge:pickRankScore(b)-pickRankScore(a));
+}
+function searchControl(placeholder) {
+ return `<form class="field" onsubmit="event.preventDefault();EL.filter('search',this.elements.query.value)"><label for="workspace-search">Search</label><div style="display:flex;gap:8px"><input id="workspace-search" name="query" type="search" value="${attribute(ui.search)}" placeholder="${attribute(placeholder)}"><button class="button" type="submit">Find</button></div></form>`;
+}
+function selectControl(label,key,items) {
+ return `<label class="field">${esc(label)}<select onchange="EL.filter('${key}',this.value)">${items.map(([k,v])=>`<option value="${attribute(k)}" ${ui[key]===k?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`;
+}
+function scannerView() {
+ const rows=filteredOpportunities(),all=currentOpportunities();
+ return `<section class="panel"><div class="panel-head"><div><h2>Market opportunities</h2><p>${rows.length} of ${all.length} upcoming quotes · probability gap, not guaranteed value</p></div></div><div class="tools">${searchControl('Team, selection or book')}${selectControl('Sport','sport',[['all','All sports'],...[...new Set(all.map(p=>p.sport))].sort().map(x=>[x,x])])}${selectControl('Market','market',[['all','All markets'],['ML','Moneyline'],['Spread','Spread'],['Total','Total']])}${selectControl('Sort','sort',[['rank','Model rank'],['gap','Largest gap'],['time','Starting soon']])}</div>${rows.length?opportunityRows(rows.slice(0,ui.limit)):emptyState(all.length?'No matching opportunities':'No current scan opportunities',all.length?'Change the filters or search to see other opportunities.':'Scan current markets to populate this view. Older tracked records remain in Tracker.')}${rows.length>ui.limit?`<button class="button" onclick="EL.loadMore()">Show more opportunities</button>`:''}</section>${st.picks?.flagged?.length?`<section class="panel"><h2>Flagged for review</h2><p class="quiet">These gaps exceed the sanity threshold and are not recommendations.</p>${st.picks.flagged.map(flagCard).join('')}</section>`:''}<p class="section-note">The Scanner shows current scan quotes, including opportunities beyond your Today display limit. Filtering this screen does not alter research tracking. Older caches may show a smaller cohort until the next scan.</p>`;
+}
+function trackedRecords() {
+ const query=ui.search.trim().toLowerCase();
+ const rows=[...st.pending,...st.history];
+ return rows.filter(p=>{
+  const result=getRes(p.id)||p.result;
+  const eligible=ui.tracker==='all'||(ui.tracker==='pending'&&!result)||(ui.tracker==='placed'&&['W','L','P'].includes(result))||(ui.tracker==='none'&&result==='N');
+  return eligible&&(!query||`${p.bet} ${p.game} ${p.book}`.toLowerCase().includes(query));
+ }).sort((a,b)=>ui.tracker==='pending'?Date.parse(a.commenceTime)-Date.parse(b.commenceTime):Date.parse(b.commenceTime)-Date.parse(a.commenceTime));
+}
+function closeLabel(p) {return isCapturedClose(p)?`${fCLV(cCLV(p.line,p.closingLine))} pregame proxy`:p.closingLine!=null?'Unverified close — excluded':'Close not captured';}
+function trackerView() {
+ const rows=trackedRecords();
+ return `<section class="panel"><div class="panel-head"><div><h2>Bet records</h2><p>${st.history.length} history · ${st.pending.length} pending · entry prices stay fixed</p></div><button class="button" onclick="EL.exportBackup()">Back up</button></div><div class="pillbar" role="group" aria-label="Record status">${[['pending','Pending'],['placed','Placed results'],['none','No bet'],['all','All records']].map(([k,v])=>`<button aria-pressed="${ui.tracker===k}" onclick="${action('filter','tracker',k)}">${v}</button>`).join('')}</div><div class="tools">${searchControl('Find a saved record')}</div><p class="quiet">${rows.length} matching records. Pending means tracked; it does not mean you placed a bet.</p>${rows.slice(0,ui.limit).map(p=>{const r=getRes(p.id)||p.result;return `<article class="record"><div><strong>${esc(p.bet)}</strong><p>${esc(p.game)}</p><p>${esc(p.book)} · Entry <b>${fO(p.line)}</b> · ${esc(fDT(p.commenceTime))}</p><span class="tag">${esc(closeLabel(p))}</span></div><div class="record-actions"><button class="textbutton" onclick="${action('detail',p.id)}">Details</button><button class="button" onclick="${action('openSettle',p.id)}">${r?({W:'Win',L:'Loss',P:'Push',N:'No bet'}[r]||'Review'):'Settle'}</button></div></article>`;}).join('')||emptyState('No matching records','Your saved records will appear here. You can restore a phone backup in Settings.','Open settings','openWorkspaceSettings')}${rows.length>ui.limit?`<button class="button" onclick="EL.loadMore()">Show more records</button>`:''}</section>`;
+}
+function detailView() {
+ const canonical=[...st.history,...st.pending].find(p=>p.id===ui.detailId);
+ const quote=currentOpportunities().find(p=>p.id===ui.detailId);
+ const p=quote||canonical;
+ if(!p)return emptyState('Record unavailable','The selected record is not in this browser. Return to the Tracker.','Open tracker','openTracker');
+ const confidence=p.confMeta?confidenceLabel(quantConfidence(p)):null;
+ const currentTitle=quote?'Current scan quote':'Saved entry';
+ return `<button class="textbutton back" onclick="${action('navigate',ui.detailFrom||'scanner')}">← Back</button><section class="panel"><div class="eyebrow">${esc(p.sport)} / ${esc(p.mkt)}</div><h2 style="font-size:27px">${esc(p.bet)}</h2><p class="sub">${esc(p.game)} · ${esc(fDT(p.commenceTime))}</p><div class="detail-grid"><div><small>${currentTitle} · ${esc(p.book)}</small><strong>${fO(p.line)}</strong></div><div><small>Probability gap</small><strong class="positive">${Number.isFinite(p.edge)?fGap(p.edge):'—'}</strong></div><div><small>Modeled EV</small><strong>${Number.isFinite(p.edgeEV)?fE(p.edgeEV):'—'}</strong></div></div><p class="quiet">${quote?'These figures belong to the current scan quote. Your original saved entry is shown separately below.':'This is a saved entry, not a current offer.'+(p.entrySchema!==4?' Legacy entry features are excluded from edge and confidence calibration.':'')}</p></section><div class="split"><section class="panel"><h2>Reference & confidence</h2><div class="aside-line"><span>Reference</span><strong>${p.sharp?'Pinnacle':'Book consensus'}</strong></div><div class="aside-line"><span>Estimated fair probability</span><strong>${Number.isFinite(p.fairProb)?(100*p.fairProb).toFixed(1)+'%':'—'}</strong></div><div class="aside-line"><span>Structural confidence</span><strong>${confidence?esc(confidence.tier):'Not recorded'}</strong></div><p class="quiet">${confidence?.strongest?esc(confidence.strongest)+'. ':''}${confidence?.weakest?esc(confidence.weakest)+'.':''}</p><p class="quiet">The gap measures disagreement against the reference. It does not establish a true winning probability.</p>${quote&&Number.isFinite(p.fairProb)&&st.bankroll?`<p class="quiet">Quarter-Kelly calculation: $${kellyStake(p.fairProb,p.line,st.bankroll).toFixed(2)} against your $${st.bankroll} bankroll. This assumes the reference probability is accurate.</p>`:''}</section><section class="panel"><h2>Original tracked record</h2>${canonical?`<div class="aside-line"><span>Entry odds</span><strong>${fO(canonical.line)}</strong></div><div class="aside-line"><span>Result</span><strong>${({W:'Win',L:'Loss',P:'Push',N:'No bet'}[canonical.result])||'Pending'}</strong></div><p class="quiet">${esc(closeLabel(canonical))}</p>${canonical.closingLine!=null?`<p class="quiet">Recorded close: ${fO(canonical.closingLine)}</p>`:''}${canonical.closeEvidence?`<p class="quiet">Source quote: ${esc(fDT(canonical.closeEvidence.quoteAt))}<br>Observed: ${esc(fDT(canonical.closeEvidence.observedAt))}</p>`:''}<button class="button" onclick="${action('openSettle',canonical.id)}">${canonical.result?'Review result':'Settle / mark No bet'}</button>`:'<p class="quiet">No canonical record is available for settlement.</p>'}</section></div>`;
+}
+function performanceView() {
+ const d=recordSummary(),rows=d.closes,x=clvExcludedCounts();const mean=rows.length?rows.reduce((a,p)=>a+cCLV(p.line,p.closingLine),0)/rows.length:null;const se=eventClusterSE(rows,mean);
+ return summaryCards()+`<section class="panel"><div class="panel-head"><div><h2>Closing-line evidence</h2><p>Same-book implied-probability movement, using observed pregame proxies</p></div></div><div class="detail-grid"><div><small>Average proxy CLV</small><strong>${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Eligible unique wagers</small><strong>${rows.length}</strong></div><div><small>Excluded close records</small><strong>${x.total}</strong></div></div><p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by event.`:'An interval is shown only after at least 30 event clusters.'}</p><p class="quiet">${x.legacy} legacy / unverified · ${x.fallback} fallback · ${x.duplicates} duplicate close records. These exclusions do not remove bet results.</p><p class="quiet">${sampleNote(rows.length)}</p></section><div class="split"><div>${calibrationTable('Edge calibration',calibrationRows(),'Modeled probability gap at the original entry. Legacy mutable features are excluded.')}${calibrationTable('Confidence calibration',confidenceCalibrationRows(),'Structural confidence recorded at entry. Compare the observed averages before drawing conclusions.')}</div><div>${calibrationTable('Odds calibration',oddsCalibrationRows(),'Entry-price bands, using the same eligible deduplicated observations.')}${calibrationTable('Sport calibration',sportCalibrationRows(),'Eligible pregame-proxy observations grouped by sport.')}</div></div><p class="section-note">Old records stay saved. Edge and confidence calibration require immutable entry features from the repaired build. Profit/loss above uses the existing $10-flat convention, not your actual sportsbook account balance.</p>`;
+}
+function aiView() {
+ const batches=layerBatches(),eligible=studyBatches();
+ return `<section class="panel"><div class="panel-head"><div><h2>Prospective AI research</h2><p>${eligible.length} eligible completed batches · ${batches.length} total logged attempts</p></div><button class="button" onclick="${action('navigate','settings')}">Configure models</button></div><p class="quiet">Candidates and Layer 1's choice are saved before requests. Late responses and failed attempts stay in the log but are excluded from the comparison. Repeated events do not inflate the paired sample.</p></section>${aiPanel()||`<section class="panel">${emptyState('No eligible finalists','Run a market scan to create a current pool. AI setup is available in Settings.')}</section>`}${leaderboardPanel()||'<section class="panel"><h2>No model scores yet</h2><p class="quiet">Scores require a prospective selection and an eligible pregame close.</p></section>'}${layerComparisonPanel()||'<section class="panel"><h2>Layer 1 vs Layer 2</h2><p class="quiet">No eligible paired closes yet. A comparison will appear when both selected records have validated close evidence.</p></section>'}`;
+}
+function settingsView() {
+ return `<div class="split"><div><section class="panel"><h2>Market connection</h2><p class="quiet">${AK?'An Odds API key is stored in this browser.':'No Odds API key is connected.'} Requests and close tracking use your provider quota.</p><label class="field">Odds API key<input id="key-inp" type="password" autocomplete="off" placeholder="Enter or replace key"></label><button class="button primary" style="margin-top:14px" onclick="EL.saveKey()">Save key & scan</button></section><section class="panel"><h2>Research settings</h2><div class="form-grid" style="margin-top:20px"><label class="field">Minimum probability gap (pp)<input type="number" min="0.5" max="5" step="0.1" value="${(minEdge()*100).toFixed(1)}" onchange="EL.updateNumber('minEdge',this.value)"></label><label class="field">Picks per Today window<input type="number" min="1" max="20" step="1" value="${topN()}" onchange="EL.updateNumber('topN',this.value)"></label></div><label class="checkboxline"><input type="checkbox" ${maxOddsCap()!=null?'checked':''} onchange="EL.toggleOddsCap(this.checked)">Limit displayed odds</label>${maxOddsCap()!=null?`<label class="field">Maximum absolute American odds<input type="number" min="200" max="3000" step="100" value="${maxOddsCap()}" onchange="EL.updateNumber('maxOddsCap',this.value)"></label>`:''}<p class="quiet">Display limits do not truncate the stored research cohort. Changes apply on the next scan.</p><button class="button" onclick="EL.setBankroll()">${st.bankroll?'Bankroll: $'+st.bankroll+' · edit':'Set bankroll'}</button></section></div><div><section class="panel"><h2>AI connection</h2><p class="quiet">Your existing Worker holds the provider keys. The secret is kept in this browser and is not included in backups.</p><label class="field">Worker URL<input type="url" value="${attribute(getWorkerUrl())}" placeholder="https://your-worker.workers.dev" onchange="EL.saveWorkerUrl(this.value)"></label><label class="field" style="margin-top:14px">Worker secret<input type="password" autocomplete="off" placeholder="Enter or replace secret" onchange="EL.saveWorkerSecret(this.value)"></label><div style="margin-top:18px">${Object.entries(MODELS).map(([id,m])=>`<label class="checkboxline"><input type="checkbox" ${getAiModels().includes(id)?'checked':''} onchange="EL.toggleAiModel('${id}',this.checked)">${esc(m.name)}</label>`).join('')}</div></section><section class="panel"><h2>Backup & restore</h2><p class="quiet">${st.history.length} history records and ${st.pending.length} pending records in this browser. A backup on your Mac does not include records saved only on your phone.</p><div class="record-actions"><button class="button primary" onclick="EL.exportBackup()">Download backup</button><label class="button">Restore backup<input aria-label="Restore backup file" type="file" accept="application/json" style="max-width:180px" onchange="EL.importBackup(this.files[0])"></label></div><p class="quiet">Restoring replaces this browser's dataset after confirmation. Use your phone backup to recover phone records. API keys and Worker secrets must be re-entered on a new device.</p></section></div></div>`;
+}
+Object.assign(window.EL,{
+ openWorkspaceSettings(){this.navigate('settings');},openTracker(){this.navigate('tracker');},
+ updateNumber(key,raw){const value=Number(raw);const bounds={minEdge:[.5,5],topN:[1,20],maxOddsCap:[200,3000]}[key];if(!bounds||!Number.isFinite(value)||value<bounds[0]||value>bounds[1]||(key==='topN'&&!Number.isInteger(value))){st.err='Enter a value within the displayed range.';render();return;}st.err='';this.saveSetting(key,key==='minEdge'?value/100:value);}
+});
+function routeView(page) {return ({scanner:scannerView,detail:detailView,tracker:trackerView,performance:performanceView,ai:aiView,settings:settingsView}[page]||todayView)();}
+
+function calibrationTable(title,rows,description) {
+ return `<section class="panel"><h2>${esc(title)}</h2><p class="quiet">${esc(description)}</p>${rows.length?`<table class="calibration-table"><thead><tr><th scope="col">Group</th><th scope="col">N</th><th scope="col">Average CLV</th></tr></thead><tbody>${rows.map(r=>`<tr><th scope="row">${esc(r.label)}</th><td>${r.n}</td><td>${r.avgClv==null?'—':fCLV(r.avgClv)}</td></tr>`).join('')}</tbody></table>`:'<p class="quiet">No eligible observations yet.</p>'}</section>`;
+}
+
+init();
+setInterval(() => { if (document.visibilityState === 'visible') maintainCloses(); },60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') maintainCloses(); });
+</script>
+<script>
+/* =========================================================================
+ * emBET Phase 1 — client sync module
+ *
+ * Drop-in. Paste this whole block as a new <script> immediately BEFORE the
+ * closing </body> tag, after the existing app script. It touches the existing
+ * code in four places, all by reassigning top-level function bindings — no
+ * edits to the app's own source are required.
+ *
+ *   1. isCapturedClose()  — also accept server evidence (observed-pregame-v2,
+ *                           wider window). v1 records keep their v1 rules.
+ *   2. persistRecords()   — mark changed records dirty and schedule a push.
+ *   3. settingsView()     — append a Sync panel.
+ *   4. init()             — already ran; we pull once on load and re-render.
+ *
+ * Design rules (build plan §5), enforced here as well as on the server:
+ *   - never delete a local record because the server did not return it
+ *   - first sync pushes local state before trusting server state
+ *   - a server-captured close outranks anything this browser produced
+ *   - entry fields are never sent as edits; the server ignores them anyway
+ * ========================================================================= */
+(function () {
+  'use strict';
+
+  const SYNC_URL    = 'embet_sync_url';
+  const SYNC_SECRET = 'embet_sync_secret';
+  const SYNC_REV    = 'embet_sync_rev';
+  const SYNC_SIGS   = 'embet_sync_sigs';
+  const SYNC_PROXY  = 'embet_sync_proxy_odds';
+
+  const syncUrl    = () => (LS.get(SYNC_URL) || '').replace(/\/+$/, '');
+  const syncSecret = () => LS.get(SYNC_SECRET) || '';
+  const syncOn     = () => !!(syncUrl() && syncSecret());
+
+  const S = { busy: false, last: null, err: null, pulled: 0, pushed: 0, remapped: 0, deduped: 0, protected: 0, serverEmpty: null };
+  window.EmbetSync = S;
+
+  /* ---------------------------------------------------------------- dirty */
+  // persistRecords() cannot tell us what changed, so we diff a cheap
+  // signature per record. Entry fields are excluded deliberately: they are
+  // immutable, so a change there is a bug, not something to replicate.
+  const sig = p => [
+    p.result ?? '', p.settledAt ?? '', p.closingLine ?? '', p.closeSource ?? '',
+    p.closingAt ?? '', p.latestLine ?? '', p.latestLineAt ?? '',
+    p.preClose?.quoteAt ?? '', p.deleted ? 1 : 0
+  ].join('|');
+
+  function dirtyIds() {
+    const prev = LS.get(SYNC_SIGS) || {};
+    const out = [];
+    for (const p of [...st.pending, ...st.history]) {
+      if (!p || !p.id) continue;
+      if (prev[p.id] !== sig(p)) out.push(p.id);
+    }
+    return out;
+  }
+  function commitSigs(skip = new Set()) {
+    const map = {};
+    for (const p of [...st.pending, ...st.history])
+      if (p && p.id && !skip.has(p.id)) map[p.id] = sig(p);
+    LS.set(SYNC_SIGS, map);      // omitted ids read as dirty next time
+  }
+
+  /* ------------------------------------------------------------ transport */
+  async function api(path, opts = {}) {
+    const res = await fetch(syncUrl() + path, {
+      method: opts.method || (opts.body ? 'POST' : 'GET'),
+      headers: { 'authorization': 'Bearer ' + syncSecret(), 'content-type': 'application/json' },
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Sync ${res.status}`);
+    return data;
+  }
+
+  /* ------------------------------------------------------------- adapters */
+  const OUT_DROP = new Set(['_sig']);
+  function outbound(p) {
+    const o = {};
+    for (const k in p) if (!OUT_DROP.has(k)) o[k] = p[k];
+    o.updatedAt = new Date().toISOString();
+    return o;
+  }
+
+  // Server rows arrive already in client shape (the Worker's toClient()).
+  // The one thing we must not do is trust a server row's `result` over a
+  // local settle that has not been pushed yet — but /api/sync applies our
+  // push before computing the response, so anything we get back already
+  // reflects it.
+  const natKey = p => `${p.gameId || p.game || '?'}|${p.mkt}|${p.bet}|${p.book}`;
+
+  function applyServerRecords(rows, protect = new Set()) {
+    if (!rows?.length) return 0;
+    const byId = new Map();
+    for (const p of st.pending) byId.set(p.id, { list: 'pending', rec: p });
+    for (const p of st.history) byId.set(p.id, { list: 'history', rec: p });
+
+    let n = 0;
+    for (const row of rows) {
+      if (row.deleted) continue;                  // soft deletes: leave local alone
+      // Edited on this device while the request was in flight. The server's
+      // copy predates that edit, so applying it would silently revert a
+      // settle. Keep local; it stays dirty and pushes on the next cycle.
+      if (protect.has(row.id)) continue;
+      const hit = byId.get(row.id);
+      const belongs = row.result ? 'history' : 'pending';
+      if (!hit) {
+        (belongs === 'history' ? st.history : st.pending).push(row);
+        n++;
+        continue;
+      }
+      // merge in place so object identity survives for anything holding a ref
+      Object.assign(hit.rec, row);
+      if (hit.list !== belongs) {
+        if (belongs === 'history') {
+          st.pending = st.pending.filter(x => x.id !== row.id);
+          if (!st.history.some(x => x.id === row.id)) st.history.push(hit.rec);
+        } else {
+          st.history = st.history.filter(x => x.id !== row.id);
+          if (!st.pending.some(x => x.id === row.id)) st.pending.push(hit.rec);
+        }
+      }
+      n++;
+    }
+
+    // Self-heal: retire any local record that duplicates a canonical server
+    // row under a different id. Record ids are generated per device, so the
+    // same wager can exist locally under a name the server has never used.
+    // Only a confirmed server row can displace a local one, so a record this
+    // device created and has not yet pushed is never dropped.
+    const canonical = new Map();
+    for (const row of rows) if (!row.deleted) canonical.set(natKey(row), row.id);
+    const drop = new Set();
+    for (const p of [...st.pending, ...st.history]) {
+      if (protect.has(p.id)) continue;            // never retire an unsaved edit
+      const id = canonical.get(natKey(p));
+      if (id && id !== p.id) drop.add(p.id);
+    }
+    if (drop.size) {
+      st.pending = st.pending.filter(p => !drop.has(p.id));
+      st.history = st.history.filter(p => !drop.has(p.id));
+      S.deduped = drop.size;
+    } else S.deduped = 0;
+
+    return n;
+  }
+
+  function localModelPicks() {
+    const perf = LS.get('embet_model_perf') || {};
+    const out = [];
+    for (const [modelId, d] of Object.entries(perf))
+      for (const p of (d.picks || []))
+        out.push({ modelId, pickId: p.pickId, modelName: d.modelName, date: p.date,
+                   confidence: p.confidence, clv_pp: p.clv_pp,
+                   clvLocked: !!p.clvLocked, legacy: !!p.legacy });
+    return out;
+  }
+
+  /* ------------------------------------------------------------ the cycle */
+  async function syncNow({ full = false, silent = false } = {}) {
+    if (!syncOn() || S.busy) return;
+    S.busy = true; S.err = null;
+    try {
+      const since = full ? 0 : (LS.get(SYNC_REV) || 0);
+      const ids = new Set(full ? null : dirtyIds());
+      const all = [...st.pending, ...st.history];
+      const push = full ? all : all.filter(p => ids.has(p.id));
+
+      // Settings are pushed only once this device has synced at least once.
+      // A fresh device holds defaults, and pushing them on the first sync
+      // overwrites the real settings already on the server -- the mirror
+      // image of the never-wipe-local rule.
+      const firstSync = !LS.get(SYNC_REV);
+      const body = {
+        since,
+        records: push.map(outbound),
+        ...(firstSync ? {} : {
+          settings: {
+            ...(LS.get('embet_settings') || {}),
+            bankroll: LS.get('embet_bankroll') ?? null
+          }
+        }),
+        layerBatches: LS.get('embet_layer_batches') || [],
+        modelPicks: localModelPicks()
+      };
+
+      // Signature of every local record as it stood when the request left.
+      // Anything that differs on return was edited while we were waiting.
+      const inFlight = new Map();
+      for (const p of all) inFlight.set(p.id, sig(p));
+
+      const res = await api('/api/sync', { body });
+
+      const protect = new Set();
+      for (const p of [...st.pending, ...st.history]) {
+        const before = inFlight.get(p.id);
+        if (before !== undefined && before !== sig(p)) protect.add(p.id);
+      }
+      S.protected = protect.size;
+      S.serverEmpty = res.serverEmptyBefore ?? res.serverEmpty;
+
+      // The server may report that a record we pushed was actually the same
+      // wager it already held under a different id — record ids are generated
+      // per device, so the phone and the Mac name the same bet differently.
+      // Drop our local duplicate; the canonical row arrives in this same
+      // response and is added below.
+      const remap = res.applied?.records?.idRemap || [];
+      if (remap.length) {
+        const drop = new Set(remap.map(r => r.from));
+        st.pending = st.pending.filter(p => !drop.has(p.id));
+        st.history = st.history.filter(p => !drop.has(p.id));
+        S.remapped = remap.length;
+      } else S.remapped = 0;
+      S.pushed = push.length;
+      S.pulled = applyServerRecords(res.records, protect);
+
+      // settings: server is truth once it holds any
+      if (res.settings && Object.keys(res.settings).length) {
+        const next = { ...res.settings };
+        if (next.bankroll != null) { st.bankroll = next.bankroll; LS.set('embet_bankroll', next.bankroll); }
+        delete next.bankroll;
+        if (Object.keys(next).length) { st.settings = { ...st.settings, ...next }; LS.set('embet_settings', st.settings); }
+      }
+      if (res.layerBatches?.length) {
+        // A batch is written as "requested" and rewritten when the models
+        // answer. Only adding unfamiliar batchKeys froze every batch at
+        // whichever state this device happened to see first — and
+        // studyBatches() only counts complete+eligible ones, so the Layer 1
+        // vs Layer 2 comparison would have quietly collected nothing.
+        const log = LS.get('embet_layer_batches') || [];
+        const idx = new Map(log.map((b, i) => [b.batchKey, i]));
+        const ahead = (a, b) => (a?.completedAt || '') > (b?.completedAt || '') ||
+                                (!!a?.completedAt && !b?.completedAt);
+        let changed = false;
+        for (const b of res.layerBatches) {
+          const i = idx.get(b.batchKey);
+          if (i === undefined) { log.push(b); changed = true; }
+          else if (ahead(b, log[i])) { log[i] = { ...log[i], ...b }; changed = true; }
+        }
+        if (changed) LS.set('embet_layer_batches', log);
+      }
+
+      persistRecordsRaw();
+      commitSigs(protect);          // protected ids stay dirty on purpose
+      LS.set(SYNC_REV, res.rev);
+      if (protect.size) setTimeout(() => syncNow({ silent: true }), 800);
+      S.last = new Date().toISOString();
+    } catch (e) {
+      S.err = e.message || String(e);
+      if (!silent) st.err = `Sync: ${S.err}`;
+    } finally {
+      S.busy = false;
+      render();
+    }
+  }
+  S.syncNow = syncNow;
+
+  /* -------------------------------------------------- 1. evidence version */
+  // The Worker records `observed-pregame-v2` with a 30-minute window and an
+  // ageMs field. The shipped client only accepts `observed-pregame-v1` inside
+  // 5 minutes, so without this every server-captured close would be discarded
+  // by the very validator that is supposed to protect the dataset.
+  // v1 records keep the original 5-minute rule; nothing already verified changes.
+  const V1_WINDOW = 5 * 60 * 1000;
+  const V2_WINDOW = 30 * 60 * 1000;
+  const _isCapturedClose = isCapturedClose;
+  isCapturedClose = function (p) {
+    const e = p?.closeEvidence;
+    if (e?.method !== 'observed-pregame-v2') return _isCapturedClose(p);
+    const start = Date.parse(p?.commenceTime);
+    const quote = Date.parse(e.quoteAt), observed = Date.parse(e.observedAt);
+    return p.closeSource === 'captured' &&
+      validOdds(p.line) && validOdds(p.closingLine) && p.closingLine === e.price &&
+      Number.isFinite(start) && Number.isFinite(quote) && Number.isFinite(observed) &&
+      quote <= observed && quote < start && start - quote <= V2_WINDOW &&
+      Date.now() >= start && e.gameId === p.gameId && e.mkt === p.mkt &&
+      e.bet === p.bet && e.book === p.book;
+  };
+  S.windows = { v1: V1_WINDOW, v2: V2_WINDOW };
+
+  /* --------------------------------- 5. stamp the threshold at detection */
+  // Without this, a pick cannot be attributed to the minimum-edge setting
+  // that produced it, so cohorts can't be separated after the dial moves.
+  // Guarded: if a future build renames these, the module degrades instead of
+  // throwing and taking sync down with it.
+  if (typeof mergePending === 'function' && typeof minEdge === 'function') {
+    const _mergePending = mergePending;
+    mergePending = function (pick) {
+      const out = _mergePending(pick);
+      const stored = st.pending.find(p => p.gameId === pick.gameId && p.mkt === pick.mkt &&
+                                          p.bet === pick.bet && p.book === pick.book);
+      if (stored && stored.minEdgeAtEntry === undefined) {
+        stored.minEdgeAtEntry = minEdge();
+        if (out) out.minEdgeAtEntry = stored.minEdgeAtEntry;
+      }
+      // The tracker deliberately keeps the whole non-suspicious cohort,
+      // including plays the odds cap hides from the recommendation list. That
+      // is right for research and wrong for scoring: without knowing the cap
+      // in force at entry, there is no way to separate "the scanner told me to
+      // take this" from "the scanner recorded it and never showed me".
+      if (stored && stored.maxOddsCapAtEntry === undefined &&
+          typeof maxOddsCap === 'function') {
+        stored.maxOddsCapAtEntry = maxOddsCap();       // null means no cap set
+        if (out) out.maxOddsCapAtEntry = stored.maxOddsCapAtEntry;
+      }
+      return out;
+    };
+  }
+
+  /* ------------------------------------------------- 2. persist -> push */
+  const persistRecordsRaw = persistRecords;
+  let pushTimer = null;
+  persistRecords = function () {
+    persistRecordsRaw();
+    if (!syncOn()) return;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(() => syncNow({ silent: true }), 1500);
+  };
+
+  /* ------------------------------------------------ 3. settings UI panel */
+  const _settingsView = settingsView;
+  settingsView = function () {
+    const on = syncOn();
+    const state = !on ? 'Not configured'
+      : S.busy ? 'Syncing…'
+      : S.err ? `Error: ${esc(S.err)}`
+      : S.last ? `Last sync ${esc(fDT(S.last))} · pushed ${S.pushed}, pulled ${S.pulled}`
+      : 'Configured, not yet synced';
+    return _settingsView() + `
+      <section class="panel">
+        <h2>Device sync</h2>
+        <p class="quiet">Shares one dataset between this browser and your phone, and lets the
+        Worker capture closing lines while no browser is open. Records still live in this
+        browser as a cache, so backups keep working exactly as before.</p>
+        <label class="field">Sync Worker URL
+          <input type="url" value="${attribute(syncUrl())}"
+                 placeholder="https://embet-data.you.workers.dev"
+                 onchange="EmbetSync.setUrl(this.value)"></label>
+        <label class="field" style="margin-top:14px">Sync secret
+          <input type="password" autocomplete="off" placeholder="EMBET_SYNC_SECRET"
+                 onchange="EmbetSync.setSecret(this.value)"></label>
+        <p class="quiet" style="margin-top:12px">${state}</p>
+        <div class="record-actions">
+          <button class="button primary" ${on ? '' : 'disabled'}
+                  onclick="EmbetSync.syncNow({full:true})">Sync now</button>
+          <button class="button" ${on ? '' : 'disabled'}
+                  onclick="EmbetSync.check()">Check server</button>
+        </div>
+        <p class="quiet">The secret is stored in this browser only and is never written into
+        backup files. Enter it once per device.</p>
+      </section>` + gradesPanel();
+  };
+
+  /* ------------------------------------------------ 3b. model record panel */
+  // Results used to arrive only by hand, which meant the 40 picks that were
+  // never wagered could not be scored at all — the model's own record was
+  // unmeasurable. The Worker now grades every finished pick from the final
+  // score and keeps that grade separate from the wager ledger.
+  const pct = v => (v == null ? '—' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%');
+  const line = (label, r) => !r || !r.picks ? '' : `
+    <tr><td>${esc(label)}</td><td>${r.picks}</td>
+        <td>${r.W}-${r.L}${r.P ? '-' + r.P : ''}</td>
+        <td>${r.netUnits > 0 ? '+' : ''}${r.netUnits.toFixed(2)}u</td>
+        <td>${pct(r.roi)}</td></tr>`;
+
+  function gradesPanel() {
+    if (!syncOn()) return '';
+    const g = S.grades;
+    if (g === undefined) { setTimeout(loadGrades, 0); return ''; }
+    if (g === null) return '';
+    const p = g.performance || {};
+    const errs = Object.entries(g.gradeErrors || {});
+    return `
+      <section class="panel">
+        <h2>Model record</h2>
+        <p class="quiet">Graded from final scores, not from what was bet. Flat one unit per pick,
+        settled at the price on the ticket. Win rate is shown but is not the measure — most of
+        these are underdogs, where losing most of the time is still profitable.</p>
+        <table class="tbl"><thead><tr>
+          <th>Set</th><th>Picks</th><th>W-L</th><th>Net</th><th>ROI</th>
+        </tr></thead><tbody>
+          ${line('Recommended — inside your odds cap', p.recommended)}
+          ${line('Tracked only — cap hid these from you', p.trackedOnly)}
+          ${line('All distinct picks (both of the above)', p.distinctPicks)}
+          ${line('Only the ones you bet', p.wageredOnly)}
+        </tbody></table>
+        <p class="quiet" style="margin-top:8px">The scanner records every
+        non-suspicious opportunity so the research cohort isn't filtered by what
+        it chose to display — but it only recommends what clears your odds cap.
+        Charging the model for longshots it never showed you is not a fair
+        score, so those are on their own line. Basis: ${esc(p.capBasis || '—')}.</p>
+        ${!p.byPrice?.length ? '' : `
+        <h3 style="margin-top:18px">By price</h3>
+        <p class="quiet">Break-even is the hit rate a price needs just to not
+        lose money. A bucket of long shots going 0-for-13 is an ordinary
+        weekend, not evidence — compare wins against expected, not against zero.</p>
+        <table class="tbl"><thead><tr>
+          <th>Price</th><th>Picks</th><th>W</th><th>Exp. W</th><th>Break-even</th><th>Net</th><th>ROI</th>
+        </tr></thead><tbody>
+          ${p.byPrice.map(b => `<tr>
+            <td>${esc(b.bucket)}</td><td>${b.picks}</td><td>${b.W}</td>
+            <td>${b.expectedWins.toFixed(1)}</td>
+            <td>${(b.breakEvenHitRate * 100).toFixed(1)}%</td>
+            <td>${b.netUnits > 0 ? '+' : ''}${b.netUnits.toFixed(2)}u</td>
+            <td>${pct(b.roi)}</td></tr>`).join('')}
+        </tbody></table>`}
+        <p class="quiet" style="margin-top:10px">
+          ${g.awaitingGrade} finished ${g.awaitingGrade === 1 ? 'pick' : 'picks'} awaiting a score
+          ${errs.length ? '· ' + errs.map(([k, n]) => `${n} ${esc(k)}`).join(' · ') : ''}
+          ${g.disagreements?.length
+            ? `<br><b>${g.disagreements.length} of your entered results disagree with the final score.</b>
+               Nothing was changed — check them.`
+            : ''}
+        </p>
+        <div class="record-actions">
+          <button class="button" onclick="EmbetSync.grade()">Grade now</button>
+        </div>
+      </section>`;
+  }
+
+  async function loadGrades() {
+    try { S.grades = await api('/api/grades'); }
+    catch { S.grades = null; }          // never let a reporting panel break settings
+    render();
+  }
+  S.grade = async () => {
+    try {
+      await api('/api/grade/run?force=1', { method: 'POST' });
+      S.grades = undefined;
+      await loadGrades();
+    } catch (e) { window.alert('Grading failed: ' + e.message); }
+  };
+
+  S.setUrl = v => { LS.set(SYNC_URL, String(v || '').trim().replace(/\/+$/, '')); render(); };
+  S.setSecret = v => { LS.set(SYNC_SECRET, String(v || '').trim()); render(); };
+  S.check = async () => {
+    try {
+      const h = await api('/api/health');
+      st.err = '';
+      window.alert(
+        `Server OK\n\n` +
+        `records: ${h.records}\n` +
+        `results: ${JSON.stringify(h.byResult)}\n` +
+        `closes: ${JSON.stringify(h.closeSource)}\n` +
+        `odds requests today: ${h.oddsUsageToday?.requests ?? 0} / ${h.dailyCap}\n` +
+        `last cron: ${h.lastCron ? h.lastCron.ran_at : 'never'}`
+      );
+    } catch (e) { window.alert('Server check failed: ' + e.message); }
+  };
+
+  /* ------------------------------------- 4. optional: route odds via Worker */
+  // Off by default. When enabled, Odds API calls are rewritten to the Worker so
+  // the key leaves this file. Turn it on only after sync is proven, because it
+  // changes how scanning fetches.
+  if (LS.get(SYNC_PROXY) && syncOn()) {
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      const url = typeof input === 'string' ? input : input?.url;
+      if (url && url.startsWith('https://api.the-odds-api.com/v4')) {
+        const u = new URL(url);
+        const target = new URL(syncUrl() +
+          (u.pathname.includes('/odds/') ? '/api/odds/events' : '/api/odds/sports'));
+        if (u.pathname.includes('/odds/')) {
+          target.searchParams.set('sport', u.pathname.split('/sports/')[1].split('/')[0]);
+          for (const k of ['markets', 'eventIds', 'bookmakers'])
+            if (u.searchParams.get(k)) target.searchParams.set(k, u.searchParams.get(k));
+        } else if (u.searchParams.get('all')) target.searchParams.set('all', 'true');
+        return nativeFetch(target.toString(), {
+          headers: { authorization: 'Bearer ' + syncSecret() }
+        });
+      }
+      return nativeFetch(input, init);
+    };
+  }
+
+  /* ----------------------------------------------------------- first pull */
+  if (syncOn()) {
+    // Pull-then-merge on load. A full push goes with it, so an empty server
+    // gets seeded from this browser rather than emptying it.
+    setTimeout(() => syncNow({ full: !LS.get(SYNC_REV), silent: true }), 400);
+    setInterval(() => { if (document.visibilityState === 'visible') syncNow({ silent: true }); }, 5 * 60 * 1000);
+
+    // Belt and braces. The Worker's cron is registered and currently fires
+    // nothing, which would mean no closes are captured at all. Poking the same
+    // job from an open page is strictly worse than a cron — it only runs when a
+    // device is awake — but it is far better than nothing, and it runs the
+    // server-side capture rules rather than the weaker in-page ones. Harmless
+    // once the cron works: the job is idempotent and short-circuits when
+    // nothing is inside the lookahead window.
+    const poke = () => {
+      if (document.visibilityState !== 'visible') return;
+      api('/api/cron/run', { method: 'POST' }).catch(() => {});
+    };
+    setTimeout(poke, 4000);
+    setInterval(poke, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') syncNow({ silent: true });
+    });
+  }
+})();
+</script>
+</body>
+</html>
