@@ -1,0 +1,31 @@
+name: emBET cron
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: embet-cron
+  cancel-in-progress: false
+
+jobs:
+  poke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Run the Worker's cron job
+        env:
+          WORKER_URL: https://embet-data.bradpeds76.workers.dev
+          SYNC_SECRET: ${{ secrets.EMBET_SYNC_SECRET }}
+        run: |
+          if [ -z "$SYNC_SECRET" ]; then
+            echo "EMBET_SYNC_SECRET is not set in repository secrets."
+            exit 1
+          fi
+          curl --silent --show-error --fail-with-body \
+               --max-time 60 \
+               -X POST \
+               -H "Authorization: Bearer $SYNC_SECRET" \
+               "$WORKER_URL/api/cron/run"
+          echo
