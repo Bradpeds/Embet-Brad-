@@ -2579,6 +2579,16 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
         stored.minEdgeAtEntry = minEdge();
         if (out) out.minEdgeAtEntry = stored.minEdgeAtEntry;
       }
+      // The tracker deliberately keeps the whole non-suspicious cohort,
+      // including plays the odds cap hides from the recommendation list. That
+      // is right for research and wrong for scoring: without knowing the cap
+      // in force at entry, there is no way to separate "the scanner told me to
+      // take this" from "the scanner recorded it and never showed me".
+      if (stored && stored.maxOddsCapAtEntry === undefined &&
+          typeof maxOddsCap === 'function') {
+        stored.maxOddsCapAtEntry = maxOddsCap();       // null means no cap set
+        if (out) out.maxOddsCapAtEntry = stored.maxOddsCapAtEntry;
+      }
       return out;
     };
   }
@@ -2655,10 +2665,31 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
         <table class="tbl"><thead><tr>
           <th>Set</th><th>Picks</th><th>W-L</th><th>Net</th><th>ROI</th>
         </tr></thead><tbody>
-          ${line('Every graded pick', p.allRows)}
-          ${line('Distinct picks (deduped across books)', p.distinctPicks)}
+          ${line('Recommended — inside your odds cap', p.recommended)}
+          ${line('Tracked only — cap hid these from you', p.trackedOnly)}
+          ${line('All distinct picks (both of the above)', p.distinctPicks)}
           ${line('Only the ones you bet', p.wageredOnly)}
         </tbody></table>
+        <p class="quiet" style="margin-top:8px">The scanner records every
+        non-suspicious opportunity so the research cohort isn't filtered by what
+        it chose to display — but it only recommends what clears your odds cap.
+        Charging the model for longshots it never showed you is not a fair
+        score, so those are on their own line. Basis: ${esc(p.capBasis || '—')}.</p>
+        ${!p.byPrice?.length ? '' : `
+        <h3 style="margin-top:18px">By price</h3>
+        <p class="quiet">Break-even is the hit rate a price needs just to not
+        lose money. A bucket of long shots going 0-for-13 is an ordinary
+        weekend, not evidence — compare wins against expected, not against zero.</p>
+        <table class="tbl"><thead><tr>
+          <th>Price</th><th>Picks</th><th>W</th><th>Exp. W</th><th>Break-even</th><th>Net</th><th>ROI</th>
+        </tr></thead><tbody>
+          ${p.byPrice.map(b => `<tr>
+            <td>${esc(b.bucket)}</td><td>${b.picks}</td><td>${b.W}</td>
+            <td>${b.expectedWins.toFixed(1)}</td>
+            <td>${(b.breakEvenHitRate * 100).toFixed(1)}%</td>
+            <td>${b.netUnits > 0 ? '+' : ''}${b.netUnits.toFixed(2)}u</td>
+            <td>${pct(b.roi)}</td></tr>`).join('')}
+        </tbody></table>`}
         <p class="quiet" style="margin-top:10px">
           ${g.awaitingGrade} finished ${g.awaitingGrade === 1 ? 'pick' : 'picks'} awaiting a score
           ${errs.length ? '· ' + errs.map(([k, n]) => `${n} ${esc(k)}`).join(' · ') : ''}
