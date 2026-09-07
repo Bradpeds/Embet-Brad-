@@ -2300,7 +2300,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   const syncSecret = () => LS.get(SYNC_SECRET) || '';
   const syncOn     = () => !!(syncUrl() && syncSecret());
 
-  const S = { busy: false, last: null, err: null, pulled: 0, pushed: 0, remapped: 0, serverEmpty: null };
+  const S = { busy: false, last: null, err: null, pulled: 0, pushed: 0, remapped: 0, deduped: 0, protected: 0, serverEmpty: null };
   window.EmbetSync = S;
 
   /* ---------------------------------------------------------------- dirty */
@@ -2322,10 +2322,11 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
     }
     return out;
   }
-  function commitSigs() {
+  function commitSigs(skip = new Set()) {
     const map = {};
-    for (const p of [...st.pending, ...st.history]) if (p && p.id) map[p.id] = sig(p);
-    LS.set(SYNC_SIGS, map);
+    for (const p of [...st.pending, ...st.history])
+      if (p && p.id && !skip.has(p.id)) map[p.id] = sig(p);
+    LS.set(SYNC_SIGS, map);      // omitted ids read as dirty next time
   }
 
   /* ------------------------------------------------------------ transport */
@@ -2354,7 +2355,9 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   // local settle that has not been pushed yet — but /api/sync applies our
   // push before computing the response, so anything we get back already
   // reflects it.
-  function applyServerRecords(rows) {
+  const natKey = p => `${p.gameId || p.game || '?'}|${p.mkt}|${p.bet}|${p.book}`;
+
+  function applyServerRecords(rows, protect = new Set()) {
     if (!rows?.length) return 0;
     const byId = new Map();
     for (const p of st.pending) byId.set(p.id, { list: 'pending', rec: p });
@@ -2363,6 +2366,10 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
     let n = 0;
     for (const row of rows) {
       if (row.deleted) continue;                  // soft deletes: leave local alone
+      // Edited on this device while the request was in flight. The server's
+      // copy predates that edit, so applying it would silently revert a
+      // settle. Keep local; it stays dirty and pushes on the next cycle.
+      if (protect.has(row.id)) continue;
       const hit = byId.get(row.id);
       const belongs = row.result ? 'history' : 'pending';
       if (!hit) {
@@ -2383,6 +2390,26 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
       }
       n++;
     }
+
+    // Self-heal: retire any local record that duplicates a canonical server
+    // row under a different id. Record ids are generated per device, so the
+    // same wager can exist locally under a name the server has never used.
+    // Only a confirmed server row can displace a local one, so a record this
+    // device created and has not yet pushed is never dropped.
+    const canonical = new Map();
+    for (const row of rows) if (!row.deleted) canonical.set(natKey(row), row.id);
+    const drop = new Set();
+    for (const p of [...st.pending, ...st.history]) {
+      if (protect.has(p.id)) continue;            // never retire an unsaved edit
+      const id = canonical.get(natKey(p));
+      if (id && id !== p.id) drop.add(p.id);
+    }
+    if (drop.size) {
+      st.pending = st.pending.filter(p => !drop.has(p.id));
+      st.history = st.history.filter(p => !drop.has(p.id));
+      S.deduped = drop.size;
+    } else S.deduped = 0;
+
     return n;
   }
 
@@ -2425,21 +2452,35 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
         modelPicks: localModelPicks()
       };
 
+      // Signature of every local record as it stood when the request left.
+      // Anything that differs on return was edited while we were waiting.
+      const inFlight = new Map();
+      for (const p of all) inFlight.set(p.id, sig(p));
+
       const res = await api('/api/sync', { body });
+
+      const protect = new Set();
+      for (const p of [...st.pending, ...st.history]) {
+        const before = inFlight.get(p.id);
+        if (before !== undefined && before !== sig(p)) protect.add(p.id);
+      }
+      S.protected = protect.size;
       S.serverEmpty = res.serverEmptyBefore ?? res.serverEmpty;
 
-      // The server may report that a record we pushed is the same wager it
-      // already held under a different id. Drop our local duplicate; the
-      // canonical row arrives in this same response.
+      // The server may report that a record we pushed was actually the same
+      // wager it already held under a different id — record ids are generated
+      // per device, so the phone and the Mac name the same bet differently.
+      // Drop our local duplicate; the canonical row arrives in this same
+      // response and is added below.
       const remap = res.applied?.records?.idRemap || [];
       if (remap.length) {
         const drop = new Set(remap.map(r => r.from));
         st.pending = st.pending.filter(p => !drop.has(p.id));
         st.history = st.history.filter(p => !drop.has(p.id));
-      }
-      S.remapped = remap.length;
+        S.remapped = remap.length;
+      } else S.remapped = 0;
       S.pushed = push.length;
-      S.pulled = applyServerRecords(res.records);
+      S.pulled = applyServerRecords(res.records, protect);
 
       // settings: server is truth once it holds any
       if (res.settings && Object.keys(res.settings).length) {
@@ -2449,16 +2490,28 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
         if (Object.keys(next).length) { st.settings = { ...st.settings, ...next }; LS.set('embet_settings', st.settings); }
       }
       if (res.layerBatches?.length) {
+        // A batch is written as "requested" and rewritten when the models
+        // answer. Only adding unfamiliar batchKeys froze every batch at
+        // whichever state this device happened to see first — and
+        // studyBatches() only counts complete+eligible ones, so the Layer 1
+        // vs Layer 2 comparison would have quietly collected nothing.
         const log = LS.get('embet_layer_batches') || [];
-        const have = new Set(log.map(b => b.batchKey));
-        let added = false;
-        for (const b of res.layerBatches) if (!have.has(b.batchKey)) { log.push(b); added = true; }
-        if (added) LS.set('embet_layer_batches', log);
+        const idx = new Map(log.map((b, i) => [b.batchKey, i]));
+        const ahead = (a, b) => (a?.completedAt || '') > (b?.completedAt || '') ||
+                                (!!a?.completedAt && !b?.completedAt);
+        let changed = false;
+        for (const b of res.layerBatches) {
+          const i = idx.get(b.batchKey);
+          if (i === undefined) { log.push(b); changed = true; }
+          else if (ahead(b, log[i])) { log[i] = { ...log[i], ...b }; changed = true; }
+        }
+        if (changed) LS.set('embet_layer_batches', log);
       }
 
       persistRecordsRaw();
-      commitSigs();
+      commitSigs(protect);          // protected ids stay dirty on purpose
       LS.set(SYNC_REV, res.rev);
+      if (protect.size) setTimeout(() => syncNow({ silent: true }), 800);
       S.last = new Date().toISOString();
     } catch (e) {
       S.err = e.message || String(e);
@@ -2492,6 +2545,25 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
       e.bet === p.bet && e.book === p.book;
   };
   S.windows = { v1: V1_WINDOW, v2: V2_WINDOW };
+
+  /* --------------------------------- 5. stamp the threshold at detection */
+  // Without this, a pick cannot be attributed to the minimum-edge setting
+  // that produced it, so cohorts can't be separated after the dial moves.
+  // Guarded: if a future build renames these, the module degrades instead of
+  // throwing and taking sync down with it.
+  if (typeof mergePending === 'function' && typeof minEdge === 'function') {
+    const _mergePending = mergePending;
+    mergePending = function (pick) {
+      const out = _mergePending(pick);
+      const stored = st.pending.find(p => p.gameId === pick.gameId && p.mkt === pick.mkt &&
+                                          p.bet === pick.bet && p.book === pick.book);
+      if (stored && stored.minEdgeAtEntry === undefined) {
+        stored.minEdgeAtEntry = minEdge();
+        if (out) out.minEdgeAtEntry = stored.minEdgeAtEntry;
+      }
+      return out;
+    };
+  }
 
   /* ------------------------------------------------- 2. persist -> push */
   const persistRecordsRaw = persistRecords;
