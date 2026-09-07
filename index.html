@@ -2300,7 +2300,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   const syncSecret = () => LS.get(SYNC_SECRET) || '';
   const syncOn     = () => !!(syncUrl() && syncSecret());
 
-  const S = { busy: false, last: null, err: null, pulled: 0, pushed: 0, serverEmpty: null };
+  const S = { busy: false, last: null, err: null, pulled: 0, pushed: 0, remapped: 0, serverEmpty: null };
   window.EmbetSync = S;
 
   /* ---------------------------------------------------------------- dirty */
@@ -2427,6 +2427,17 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
       const res = await api('/api/sync', { body });
       S.serverEmpty = res.serverEmptyBefore ?? res.serverEmpty;
+
+      // The server may report that a record we pushed is the same wager it
+      // already held under a different id. Drop our local duplicate; the
+      // canonical row arrives in this same response.
+      const remap = res.applied?.records?.idRemap || [];
+      if (remap.length) {
+        const drop = new Set(remap.map(r => r.from));
+        st.pending = st.pending.filter(p => !drop.has(p.id));
+        st.history = st.history.filter(p => !drop.has(p.id));
+      }
+      S.remapped = remap.length;
       S.pushed = push.length;
       S.pulled = applyServerRecords(res.records);
 
