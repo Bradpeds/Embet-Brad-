@@ -2634,7 +2634,53 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
         </div>
         <p class="quiet">The secret is stored in this browser only and is never written into
         backup files. Enter it once per device.</p>
-      </section>` + gradesPanel();
+      </section>` + alertPanel() + gradesPanel();
+  };
+
+  /* ------------------------------------------------- 3a. alert threshold */
+  // Tracking and alerting answer different questions. Recording a thin pick
+  // costs nothing and is the only way to ever learn whether thin picks carry
+  // CLV — with a single threshold there is one bucket, and no curve to fit.
+  // Being pinged about one costs attention and invites betting it. So the
+  // scanner keeps its own floor and this sets a separate, higher bar for what
+  // reaches a phone.
+  const alertEdge = () => {
+    const v = st.settings?.alertMinEdge;
+    return typeof v === 'number' ? Math.max(v, minEdge()) : Math.max(0.02, minEdge());
+  };
+
+  function alertPanel() {
+    if (!syncOn()) return '';
+    const a = alertEdge(), m = minEdge();
+    return `
+      <section class="panel">
+        <h2>Alerts</h2>
+        <p class="quiet">Your Worker scans every few hours without this page open and pushes
+        new picks to your phone. It records everything at or above your scanning floor, but
+        only alerts above the bar below.</p>
+        <label class="field">Alert me at or above
+          <input type="number" min="${(m * 100).toFixed(1)}" max="10" step="0.1"
+                 value="${(a * 100).toFixed(1)}"
+                 onchange="EmbetSync.setAlertEdge(this.value)"> pp</label>
+        <p class="quiet" style="margin-top:12px">
+          Scanning floor is <b>${(m * 100).toFixed(1)}pp</b> — everything above that is tracked
+          and measurable. Alerts fire at <b>${(a * 100).toFixed(1)}pp</b> and only for games
+          inside 72 hours that clear your odds cap.
+          ${a > m ? `Picks between ${(m * 100).toFixed(1)} and ${(a * 100).toFixed(1)}pp are
+             recorded silently — they are data, not suggestions.`
+                  : 'Both bars are equal, so every tracked pick will alert.'}
+        </p>
+      </section>`;
+  }
+
+  S.setAlertEdge = v => {
+    const pp = Number(v);
+    if (!Number.isFinite(pp)) return;
+    // Never below the scanning floor, where it would be meaningless.
+    const val = Math.max(minEdge(), Math.min(0.10, pp / 100));
+    if (typeof EL?.saveSetting === 'function') EL.saveSetting('alertMinEdge', val);
+    else { st.settings = { ...st.settings, alertMinEdge: val }; render(); }
+    syncNow({ silent: true });          // the Worker is what acts on it
   };
 
   /* ------------------------------------------------ 3b. model record panel */
