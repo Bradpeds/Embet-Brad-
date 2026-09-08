@@ -2313,6 +2313,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   const SYNC_REV    = 'embet_sync_rev';
   const SYNC_SIGS   = 'embet_sync_sigs';
   const SYNC_PROXY  = 'embet_sync_proxy_odds';
+  const SETTINGS_SIG = 'embet_sync_settings_sig';
 
   const syncUrl    = () => (LS.get(SYNC_URL) || '').replace(/\/+$/, '');
   const syncSecret = () => LS.get(SYNC_SECRET) || '';
@@ -2457,14 +2458,26 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
       // overwrites the real settings already on the server -- the mirror
       // image of the never-wipe-local rule.
       const firstSync = !LS.get(SYNC_REV);
+
+      // ...and only when THIS device actually changed them. Pushing the whole
+      // blob on every sync made settings last-writer-wins by sync order rather
+      // than by edit time: a phone that had not been touched in a day kept
+      // overwriting a change just made on the Mac. Compare against what this
+      // device last agreed with the server and stay quiet when nothing moved.
+      const localSettings = {
+        ...(LS.get('embet_settings') || {}),
+        bankroll: LS.get('embet_bankroll') ?? null
+      };
+      const settingsSig = JSON.stringify(
+        Object.keys(localSettings).sort().map(k => [k, localSettings[k]]));
+      const settingsChanged = settingsSig !== LS.get(SETTINGS_SIG);
+
       const body = {
         since,
         records: push.map(outbound),
-        ...(firstSync ? {} : {
-          settings: {
-            ...(LS.get('embet_settings') || {}),
-            bankroll: LS.get('embet_bankroll') ?? null
-          }
+        ...(firstSync || !settingsChanged ? {} : {
+          settings: localSettings,
+          settingsAt: new Date().toISOString()
         }),
         layerBatches: LS.get('embet_layer_batches') || [],
         modelPicks: localModelPicks()
@@ -2507,6 +2520,14 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
         delete next.bankroll;
         if (Object.keys(next).length) { st.settings = { ...st.settings, ...next }; LS.set('embet_settings', st.settings); }
       }
+      // Record what this device now agrees with, so the next sync can tell a
+      // real local edit from an unchanged blob.
+      try {
+        const agreed = { ...(LS.get('embet_settings') || {}),
+                         bankroll: LS.get('embet_bankroll') ?? null };
+        LS.set(SETTINGS_SIG, JSON.stringify(
+          Object.keys(agreed).sort().map(k => [k, agreed[k]])));
+      } catch { /* a bookkeeping key is never worth failing a sync over */ }
       if (res.layerBatches?.length) {
         // A batch is written as "requested" and rewritten when the models
         // answer. Only adding unfamiliar batchKeys froze every batch at
