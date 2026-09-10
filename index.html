@@ -882,7 +882,7 @@ const EDGE_BUCKETS = [
   { lo: 0.10,  hi: Infinity, label: '>10pp'  }
 ];
 function calibrationRows() {
-  const tracked = clvObservations().filter(p => p.entrySchema === 4 && typeof p.edge === 'number');
+  const tracked = clvObservations().filter(p => p.entrySchema >= 4 && typeof p.edge === 'number');
   return EDGE_BUCKETS.map(b => {
     const inB = tracked.filter(p => p.edge >= b.lo && p.edge < b.hi);
     const clvs = inB.map(p => cCLV(p.line, p.closingLine));
@@ -981,7 +981,7 @@ function oddsCalibrationCard() {
   </div>`;
 }
 function confidenceCalibrationRows() {
-  const tracked = clvObservations().filter(p => p.entrySchema === 4 && p.confVersion === 2 && typeof p.confidence === 'number');
+  const tracked = clvObservations().filter(p => p.entrySchema >= 4 && p.confVersion === 2 && typeof p.confidence === 'number');
   const tiers = [
     { lo: 0.75, hi: 1.01, label: 'High' },
     { lo: 0.5,  hi: 0.75, label: 'Moderate' },
@@ -1250,7 +1250,7 @@ function render() {
 
     <div style="margin-bottom:18px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
-        <span style="font-size:13px;font-weight:500">Hide plays beyond a max price</span>
+        <span style="font-size:13px;font-weight:500">Stop recommending long shots</span>
         <label style="font-size:11px;color:var(--text2);display:flex;align-items:center;gap:5px;cursor:pointer">
           <input type="checkbox" ${maxOddsCap()!=null?'checked':''} onchange="EL.toggleOddsCap(this.checked)"/> On
         </label>
@@ -1262,7 +1262,7 @@ function render() {
       <input type="range" min="${MAX_ODDS_FLOOR}" max="${MAX_ODDS_CEIL}" step="50" value="${maxOddsCap()}"
         style="width:100%" oninput="EL.previewSetting('maxOddsCap', parseInt(this.value,10))" onchange="EL.saveSetting('maxOddsCap', parseInt(this.value,10))"/>
       ` : ''}
-      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">Off by default — every detected play is shown regardless of price. Turn on to hide long-shot plays beyond a price you choose (e.g. +1000). This only affects what's displayed as a recommended pick; the odds-band calibration table below keeps tracking real CLV data on the far end either way, so you can see whether long shots are actually worth including later.</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">Off by default — every detected play is recommended regardless of price. Turn it on to stop recommending long shots beyond a price you choose. This is a ceiling on the price itself, so favourites are never hidden by it: at +200, a +250 dog drops out and a −250 favourite does not. It only affects what's recommended — every play is still tracked, and the odds-band calibration table below keeps collecting real CLV on the far end, so you can find out later whether long shots were worth including after all.</div>
     </div>
 
     <div style="margin-bottom:18px">
@@ -1479,7 +1479,10 @@ window.EL = {
     // number the person flagged as too aggressive) rather than defaulting
     // to the slider's floor or ceiling; turning it off clears back to
     // unlimited (null) rather than leaving a stale number saved but unused.
-    st.settings = { ...st.settings, maxOddsCap: checked ? 1000 : null };
+    // +300 under the price-ceiling rule, not +1000 under the old symmetric
+    // one: as a ceiling, +1000 lets through nearly everything and reads as a
+    // setting that does nothing.
+    st.settings = { ...st.settings, maxOddsCap: checked ? 300 : null };
     LS.set('embet_settings', st.settings);
     render();
   },
@@ -1634,7 +1637,7 @@ function mergePending(pick) {
     if (!existing.sportKey && pick.sportKey) existing.sportKey = pick.sportKey;
     return { ...pick, id:existing.id, result:existing.result };
   }
-  const entry = { ...pick, detectedAt:new Date().toISOString(), entrySchema:4,
+  const entry = { ...pick, detectedAt:new Date().toISOString(), entrySchema:5,
     latestLine:pick.line, latestLineAt:new Date().toISOString(),
     closingLine:null, closingAt:null, closeSource:'none', lineFinalized:false };
   st.pending.push(entry);
@@ -1844,7 +1847,9 @@ async function scan() {
 
     const passesOddsCap = o => {
       const cap = maxOddsCap();
-      return cap == null || Math.abs(o.line) <= cap;
+      // ENTRY SCHEMA 5: a ceiling on price, not on distance from even money.
+      // A negative line is a favourite, never a longshot, so it always passes.
+      return cap == null || o.line <= cap;
     };
     const nearOpps   = opps.filter(o => !o.suspicious && passesOddsCap(o) && new Date(o.commenceTime).getTime() <= cut72h);
     const futureOpps = opps.filter(o => {
@@ -2058,7 +2063,7 @@ function restoreBackupData(data) {
 
 function migrateSchemaV4() {
   for (const p of [...st.pending,...st.history]) {
-    if (p.entrySchema !== 4) {
+    if (!(p.entrySchema >= 4)) {
       if (!p.legacyEntry) p.legacyEntry = {fairProb:p.fairProb,edge:p.edge,edgeEV:p.edgeEV,edgeProb:p.edgeProb,confidence:p.confidence};
       p.entrySchema = 3; // original entry features cannot be proven immutable
       if (p.closeSource === 'captured') p.closeSource = 'legacy';
@@ -2209,7 +2214,7 @@ function opportunityRows(rows) {
 }
 function emptyState(title,message,button='Scan markets',fn='rescan') {return `<div class="empty"><strong>${esc(title)}</strong>${esc(message)}<div style="margin-top:14px"><button class="button" onclick="${action(fn)}">${esc(button)}</button></div></div>`;}
 function todayView() {
- const rows=currentOpportunities().filter(p=>Date.parse(p.commenceTime)<=Date.now()+H72 && (maxOddsCap()==null || Math.abs(p.line)<=maxOddsCap())).slice(0,topN());const d=recordSummary();
+ const rows=currentOpportunities().filter(p=>Date.parse(p.commenceTime)<=Date.now()+H72 && (maxOddsCap()==null || p.line<=maxOddsCap())).slice(0,topN());const d=recordSummary();
  return summaryCards()+`<div class="split"><section class="panel"><div class="panel-head"><div><h2>Leading opportunities</h2><p>Next 72 hours · ranked by gap and confidence</p></div><button class="textbutton" onclick="${action('navigate','scanner')}">View scanner →</button></div>${rows.length?opportunityRows(rows):emptyState(st.loading?'Checking the markets…':!st.picks?'Your next scan starts here':'No upcoming opportunities',!AK?'Connect your Odds API key in Settings. Your saved records are available without a connection.':'Scan to find current price disagreements. Existing bets remain in your Tracker.')}</section><aside><section class="panel"><h2>Your workspace</h2><div class="aside-line"><span>Pending records</span><strong>${d.pending}</strong></div><div class="aside-line"><span>Saved history</span><strong>${st.history.length}</strong></div><div class="aside-line"><span>AI connection</span><strong>${getWorkerUrl()?'Configured':'Not set'}</strong></div><button class="textbutton" onclick="${action('navigate','tracker')}">Review tracker →</button></section><section class="panel"><h2>Close capture</h2><p class="quiet">${window.EmbetSync && localStorage.getItem('embet_sync_url') ? 'Collected automatically by your Worker every few minutes before kickoff, whether or not this page is open. Quotes timestamped within 30 minutes of the scheduled start qualify, and the age of each is recorded.' : 'Not configured. This page collects closes only while it is open near kickoff, and only quotes timestamped within five minutes of the start qualify. Set up Device sync in Settings for automatic collection.'}</p><p class="quiet">Missed or unverified closes never enter CLV. Your recorded bets and results are unaffected either way.</p><button class="textbutton" onclick="${action('navigate','performance')}">View the evidence &rarr;</button></section></aside></div>`;
 }
 function renderRedesign() {
@@ -2257,7 +2262,7 @@ function detailView() {
  if(!p)return emptyState('Record unavailable','The selected record is not in this browser. Return to the Tracker.','Open tracker','openTracker');
  const confidence=p.confMeta?confidenceLabel(quantConfidence(p)):null;
  const currentTitle=quote?'Current scan quote':'Saved entry';
- return `<button class="textbutton back" onclick="${action('navigate',ui.detailFrom||'scanner')}">← Back</button><section class="panel"><div class="eyebrow">${esc(p.sport)} / ${esc(p.mkt)}</div><h2 style="font-size:27px">${esc(p.bet)}</h2><p class="sub">${esc(p.game)} · ${esc(fDT(p.commenceTime))}</p><div class="detail-grid"><div><small>${currentTitle} · ${esc(p.book)}</small><strong>${fO(p.line)}</strong></div><div><small>Probability gap</small><strong class="positive">${Number.isFinite(p.edge)?fGap(p.edge):'—'}</strong></div><div><small>Modeled EV</small><strong>${Number.isFinite(p.edgeEV)?fE(p.edgeEV):'—'}</strong></div></div><p class="quiet">${quote?'These figures belong to the current scan quote. Your original saved entry is shown separately below.':'This is a saved entry, not a current offer.'+(p.entrySchema!==4?' Legacy entry features are excluded from edge and confidence calibration.':'')}</p></section><div class="split"><section class="panel"><h2>Reference & confidence</h2><div class="aside-line"><span>Reference</span><strong>${p.sharp?'Pinnacle':'Book consensus'}</strong></div><div class="aside-line"><span>Estimated fair probability</span><strong>${Number.isFinite(p.fairProb)?(100*p.fairProb).toFixed(1)+'%':'—'}</strong></div><div class="aside-line"><span>Structural confidence</span><strong>${confidence?esc(confidence.tier):'Not recorded'}</strong></div><p class="quiet">${confidence?.strongest?esc(confidence.strongest)+'. ':''}${confidence?.weakest?esc(confidence.weakest)+'.':''}</p><p class="quiet">The gap measures disagreement against the reference. It does not establish a true winning probability.</p>${quote&&Number.isFinite(p.fairProb)&&st.bankroll?`<p class="quiet">Quarter-Kelly calculation: $${kellyStake(p.fairProb,p.line,st.bankroll).toFixed(2)} against your $${st.bankroll} bankroll. This assumes the reference probability is accurate.</p>`:''}</section><section class="panel"><h2>Original tracked record</h2>${canonical?`<div class="aside-line"><span>Entry odds</span><strong>${fO(canonical.line)}</strong></div><div class="aside-line"><span>Result</span><strong>${({W:'Win',L:'Loss',P:'Push',N:'No bet'}[canonical.result])||'Pending'}</strong></div><p class="quiet">${esc(closeLabel(canonical))}</p>${canonical.closingLine!=null?`<p class="quiet">Recorded close: ${fO(canonical.closingLine)}</p>`:''}${canonical.closeEvidence?`<p class="quiet">Source quote: ${esc(fDT(canonical.closeEvidence.quoteAt))}<br>Observed: ${esc(fDT(canonical.closeEvidence.observedAt))}</p>`:''}<button class="button" onclick="${action('openSettle',canonical.id)}">${canonical.result?'Review result':'Settle / mark No bet'}</button>`:'<p class="quiet">No canonical record is available for settlement.</p>'}</section></div>`;
+ return `<button class="textbutton back" onclick="${action('navigate',ui.detailFrom||'scanner')}">← Back</button><section class="panel"><div class="eyebrow">${esc(p.sport)} / ${esc(p.mkt)}</div><h2 style="font-size:27px">${esc(p.bet)}</h2><p class="sub">${esc(p.game)} · ${esc(fDT(p.commenceTime))}</p><div class="detail-grid"><div><small>${currentTitle} · ${esc(p.book)}</small><strong>${fO(p.line)}</strong></div><div><small>Probability gap</small><strong class="positive">${Number.isFinite(p.edge)?fGap(p.edge):'—'}</strong></div><div><small>Modeled EV</small><strong>${Number.isFinite(p.edgeEV)?fE(p.edgeEV):'—'}</strong></div></div><p class="quiet">${quote?'These figures belong to the current scan quote. Your original saved entry is shown separately below.':'This is a saved entry, not a current offer.'+(p.entrySchema<4?' Legacy entry features are excluded from edge and confidence calibration.':'')}</p></section><div class="split"><section class="panel"><h2>Reference & confidence</h2><div class="aside-line"><span>Reference</span><strong>${p.sharp?'Pinnacle':'Book consensus'}</strong></div><div class="aside-line"><span>Estimated fair probability</span><strong>${Number.isFinite(p.fairProb)?(100*p.fairProb).toFixed(1)+'%':'—'}</strong></div><div class="aside-line"><span>Structural confidence</span><strong>${confidence?esc(confidence.tier):'Not recorded'}</strong></div><p class="quiet">${confidence?.strongest?esc(confidence.strongest)+'. ':''}${confidence?.weakest?esc(confidence.weakest)+'.':''}</p><p class="quiet">The gap measures disagreement against the reference. It does not establish a true winning probability.</p>${quote&&Number.isFinite(p.fairProb)&&st.bankroll?`<p class="quiet">Quarter-Kelly calculation: $${kellyStake(p.fairProb,p.line,st.bankroll).toFixed(2)} against your $${st.bankroll} bankroll. This assumes the reference probability is accurate.</p>`:''}</section><section class="panel"><h2>Original tracked record</h2>${canonical?`<div class="aside-line"><span>Entry odds</span><strong>${fO(canonical.line)}</strong></div><div class="aside-line"><span>Result</span><strong>${({W:'Win',L:'Loss',P:'Push',N:'No bet'}[canonical.result])||'Pending'}</strong></div><p class="quiet">${esc(closeLabel(canonical))}</p>${canonical.closingLine!=null?`<p class="quiet">Recorded close: ${fO(canonical.closingLine)}</p>`:''}${canonical.closeEvidence?`<p class="quiet">Source quote: ${esc(fDT(canonical.closeEvidence.quoteAt))}<br>Observed: ${esc(fDT(canonical.closeEvidence.observedAt))}</p>`:''}<button class="button" onclick="${action('openSettle',canonical.id)}">${canonical.result?'Review result':'Settle / mark No bet'}</button>`:'<p class="quiet">No canonical record is available for settlement.</p>'}</section></div>`;
 }
 function performanceView() {
  const d=recordSummary(),rows=d.closes,x=clvExcludedCounts();const mean=rows.length?rows.reduce((a,p)=>a+cCLV(p.line,p.closingLine),0)/rows.length:null;const se=eventClusterSE(rows,mean);
@@ -2268,7 +2273,7 @@ function aiView() {
  return `<section class="panel"><div class="panel-head"><div><h2>Prospective AI research</h2><p>${eligible.length} eligible completed batches · ${batches.length} total logged attempts</p></div><button class="button" onclick="${action('navigate','settings')}">Configure models</button></div><p class="quiet">Candidates and Layer 1's choice are saved before requests. Late responses and failed attempts stay in the log but are excluded from the comparison. Repeated events do not inflate the paired sample.</p></section>${aiPanel()||`<section class="panel">${emptyState('No eligible finalists','Run a market scan to create a current pool. AI setup is available in Settings.')}</section>`}${leaderboardPanel()||'<section class="panel"><h2>No model scores yet</h2><p class="quiet">Scores require a prospective selection and an eligible pregame close.</p></section>'}${layerComparisonPanel()||'<section class="panel"><h2>Layer 1 vs Layer 2</h2><p class="quiet">No eligible paired closes yet. A comparison will appear when both selected records have validated close evidence.</p></section>'}`;
 }
 function settingsView() {
- return `<div class="split"><div><section class="panel"><h2>Market connection</h2><p class="quiet">${AK?'An Odds API key is stored in this browser.':'No Odds API key is connected.'} Requests and close tracking use your provider quota.</p><label class="field">Odds API key<input id="key-inp" type="password" autocomplete="off" placeholder="Enter or replace key"></label><button class="button primary" style="margin-top:14px" onclick="EL.saveKey()">Save key & scan</button></section><section class="panel"><h2>Research settings</h2><div class="form-grid" style="margin-top:20px"><label class="field">Minimum probability gap (pp)<input type="number" min="0.5" max="5" step="0.1" value="${(minEdge()*100).toFixed(1)}" onchange="EL.updateNumber('minEdge',this.value)"></label><label class="field">Picks per Today window<input type="number" min="1" max="20" step="1" value="${topN()}" onchange="EL.updateNumber('topN',this.value)"></label></div><label class="checkboxline"><input type="checkbox" ${maxOddsCap()!=null?'checked':''} onchange="EL.toggleOddsCap(this.checked)">Limit displayed odds</label>${maxOddsCap()!=null?`<label class="field">Maximum absolute American odds<input type="number" min="200" max="3000" step="100" value="${maxOddsCap()}" onchange="EL.updateNumber('maxOddsCap',this.value)"></label>`:''}<p class="quiet">Display limits do not truncate the stored research cohort. Changes apply on the next scan.</p><button class="button" onclick="EL.setBankroll()">${st.bankroll?'Bankroll: $'+st.bankroll+' · edit':'Set bankroll'}</button></section></div><div><section class="panel"><h2>AI connection</h2><p class="quiet">Your existing Worker holds the provider keys. The secret is kept in this browser and is not included in backups.</p><label class="field">Worker URL<input type="url" value="${attribute(getWorkerUrl())}" placeholder="https://your-worker.workers.dev" onchange="EL.saveWorkerUrl(this.value)"></label><label class="field" style="margin-top:14px">Worker secret<input type="password" autocomplete="off" placeholder="Enter or replace secret" onchange="EL.saveWorkerSecret(this.value)"></label><div style="margin-top:18px">${Object.entries(MODELS).map(([id,m])=>`<label class="checkboxline"><input type="checkbox" ${getAiModels().includes(id)?'checked':''} onchange="EL.toggleAiModel('${id}',this.checked)">${esc(m.name)}</label>`).join('')}</div></section><section class="panel"><h2>Backup & restore</h2><p class="quiet">${st.history.length} history records and ${st.pending.length} pending records in this browser. A backup on your Mac does not include records saved only on your phone.</p><div class="record-actions"><button class="button primary" onclick="EL.exportBackup()">Download backup</button><label class="button">Restore backup<input aria-label="Restore backup file" type="file" accept="application/json" style="max-width:180px" onchange="EL.importBackup(this.files[0])"></label></div><p class="quiet">Restoring replaces this browser's dataset after confirmation. Use your phone backup to recover phone records. API keys and Worker secrets must be re-entered on a new device.</p></section></div></div>`;
+ return `<div class="split"><div><section class="panel"><h2>Market connection</h2><p class="quiet">${AK?'An Odds API key is stored in this browser.':'No Odds API key is connected.'} Requests and close tracking use your provider quota.</p><label class="field">Odds API key<input id="key-inp" type="password" autocomplete="off" placeholder="Enter or replace key"></label><button class="button primary" style="margin-top:14px" onclick="EL.saveKey()">Save key & scan</button></section><section class="panel"><h2>Research settings</h2><div class="form-grid" style="margin-top:20px"><label class="field">Minimum probability gap (pp)<input type="number" min="0.5" max="5" step="0.1" value="${(minEdge()*100).toFixed(1)}" onchange="EL.updateNumber('minEdge',this.value)"></label><label class="field">Picks per Today window<input type="number" min="1" max="20" step="1" value="${topN()}" onchange="EL.updateNumber('topN',this.value)"></label></div><label class="checkboxline"><input type="checkbox" ${maxOddsCap()!=null?'checked':''} onchange="EL.toggleOddsCap(this.checked)">Stop recommending long shots</label>${maxOddsCap()!=null?`<label class="field">Longest price still recommended (+odds)<input type="number" min="200" max="3000" step="100" value="${maxOddsCap()}" onchange="EL.updateNumber('maxOddsCap',this.value)"></label>`:''}<p class="quiet">Display limits do not truncate the stored research cohort. Changes apply on the next scan.</p><button class="button" onclick="EL.setBankroll()">${st.bankroll?'Bankroll: $'+st.bankroll+' · edit':'Set bankroll'}</button></section></div><div><section class="panel"><h2>AI connection</h2><p class="quiet">Your existing Worker holds the provider keys. The secret is kept in this browser and is not included in backups.</p><label class="field">Worker URL<input type="url" value="${attribute(getWorkerUrl())}" placeholder="https://your-worker.workers.dev" onchange="EL.saveWorkerUrl(this.value)"></label><label class="field" style="margin-top:14px">Worker secret<input type="password" autocomplete="off" placeholder="Enter or replace secret" onchange="EL.saveWorkerSecret(this.value)"></label><div style="margin-top:18px">${Object.entries(MODELS).map(([id,m])=>`<label class="checkboxline"><input type="checkbox" ${getAiModels().includes(id)?'checked':''} onchange="EL.toggleAiModel('${id}',this.checked)">${esc(m.name)}</label>`).join('')}</div></section><section class="panel"><h2>Backup & restore</h2><p class="quiet">${st.history.length} history records and ${st.pending.length} pending records in this browser. A backup on your Mac does not include records saved only on your phone.</p><div class="record-actions"><button class="button primary" onclick="EL.exportBackup()">Download backup</button><label class="button">Restore backup<input aria-label="Restore backup file" type="file" accept="application/json" style="max-width:180px" onchange="EL.importBackup(this.files[0])"></label></div><p class="quiet">Restoring replaces this browser's dataset after confirmation. Use your phone backup to recover phone records. API keys and Worker secrets must be re-entered on a new device.</p></section></div></div>`;
 }
 Object.assign(window.EL,{
  openWorkspaceSettings(){this.navigate('settings');},openTracker(){this.navigate('tracker');},
@@ -2313,7 +2318,6 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   const SYNC_REV    = 'embet_sync_rev';
   const SYNC_SIGS   = 'embet_sync_sigs';
   const SYNC_PROXY  = 'embet_sync_proxy_odds';
-  const SETTINGS_SIG = 'embet_sync_settings_sig';
 
   const syncUrl    = () => (LS.get(SYNC_URL) || '').replace(/\/+$/, '');
   const syncSecret = () => LS.get(SYNC_SECRET) || '';
@@ -2458,26 +2462,14 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
       // overwrites the real settings already on the server -- the mirror
       // image of the never-wipe-local rule.
       const firstSync = !LS.get(SYNC_REV);
-
-      // ...and only when THIS device actually changed them. Pushing the whole
-      // blob on every sync made settings last-writer-wins by sync order rather
-      // than by edit time: a phone that had not been touched in a day kept
-      // overwriting a change just made on the Mac. Compare against what this
-      // device last agreed with the server and stay quiet when nothing moved.
-      const localSettings = {
-        ...(LS.get('embet_settings') || {}),
-        bankroll: LS.get('embet_bankroll') ?? null
-      };
-      const settingsSig = JSON.stringify(
-        Object.keys(localSettings).sort().map(k => [k, localSettings[k]]));
-      const settingsChanged = settingsSig !== LS.get(SETTINGS_SIG);
-
       const body = {
         since,
         records: push.map(outbound),
-        ...(firstSync || !settingsChanged ? {} : {
-          settings: localSettings,
-          settingsAt: new Date().toISOString()
+        ...(firstSync ? {} : {
+          settings: {
+            ...(LS.get('embet_settings') || {}),
+            bankroll: LS.get('embet_bankroll') ?? null
+          }
         }),
         layerBatches: LS.get('embet_layer_batches') || [],
         modelPicks: localModelPicks()
@@ -2520,14 +2512,6 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
         delete next.bankroll;
         if (Object.keys(next).length) { st.settings = { ...st.settings, ...next }; LS.set('embet_settings', st.settings); }
       }
-      // Record what this device now agrees with, so the next sync can tell a
-      // real local edit from an unchanged blob.
-      try {
-        const agreed = { ...(LS.get('embet_settings') || {}),
-                         bankroll: LS.get('embet_bankroll') ?? null };
-        LS.set(SETTINGS_SIG, JSON.stringify(
-          Object.keys(agreed).sort().map(k => [k, agreed[k]])));
-      } catch { /* a bookkeeping key is never worth failing a sync over */ }
       if (res.layerBatches?.length) {
         // A batch is written as "requested" and rewritten when the models
         // answer. Only adding unfamiliar batchKeys froze every batch at
@@ -2655,53 +2639,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
         </div>
         <p class="quiet">The secret is stored in this browser only and is never written into
         backup files. Enter it once per device.</p>
-      </section>` + alertPanel() + gradesPanel();
-  };
-
-  /* ------------------------------------------------- 3a. alert threshold */
-  // Tracking and alerting answer different questions. Recording a thin pick
-  // costs nothing and is the only way to ever learn whether thin picks carry
-  // CLV — with a single threshold there is one bucket, and no curve to fit.
-  // Being pinged about one costs attention and invites betting it. So the
-  // scanner keeps its own floor and this sets a separate, higher bar for what
-  // reaches a phone.
-  const alertEdge = () => {
-    const v = st.settings?.alertMinEdge;
-    return typeof v === 'number' ? Math.max(v, minEdge()) : Math.max(0.02, minEdge());
-  };
-
-  function alertPanel() {
-    if (!syncOn()) return '';
-    const a = alertEdge(), m = minEdge();
-    return `
-      <section class="panel">
-        <h2>Alerts</h2>
-        <p class="quiet">Your Worker scans every few hours without this page open and pushes
-        new picks to your phone. It records everything at or above your scanning floor, but
-        only alerts above the bar below.</p>
-        <label class="field">Alert me at or above
-          <input type="number" min="${(m * 100).toFixed(1)}" max="10" step="0.1"
-                 value="${(a * 100).toFixed(1)}"
-                 onchange="EmbetSync.setAlertEdge(this.value)"> pp</label>
-        <p class="quiet" style="margin-top:12px">
-          Scanning floor is <b>${(m * 100).toFixed(1)}pp</b> — everything above that is tracked
-          and measurable. Alerts fire at <b>${(a * 100).toFixed(1)}pp</b> and only for games
-          inside 72 hours that clear your odds cap.
-          ${a > m ? `Picks between ${(m * 100).toFixed(1)} and ${(a * 100).toFixed(1)}pp are
-             recorded silently — they are data, not suggestions.`
-                  : 'Both bars are equal, so every tracked pick will alert.'}
-        </p>
-      </section>`;
-  }
-
-  S.setAlertEdge = v => {
-    const pp = Number(v);
-    if (!Number.isFinite(pp)) return;
-    // Never below the scanning floor, where it would be meaningless.
-    const val = Math.max(minEdge(), Math.min(0.10, pp / 100));
-    if (typeof EL?.saveSetting === 'function') EL.saveSetting('alertMinEdge', val);
-    else { st.settings = { ...st.settings, alertMinEdge: val }; render(); }
-    syncNow({ silent: true });          // the Worker is what acts on it
+      </section>` + gradesPanel();
   };
 
   /* ------------------------------------------------ 3b. model record panel */
