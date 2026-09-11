@@ -241,6 +241,14 @@ const SANITY_EDGE = 0.10;
 // not to guess where "stale" begins. Every pick records its own quote age from
 // entry schema 6, so the data can eventually answer that.
 const QUOTE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+// How far ahead the scanner is willing to price a market with no sharp book
+// quoting it. Beyond this the soft books are posting placeholders rather than
+// opinions, and averaging three placeholders produces a fair value that reads
+// exactly like a real one. Chosen from an empty gap in the data between 3.1 and
+// 9.1 days, and deliberately more permissive than Pinnacle, whose furthest-out
+// price anywhere in the dataset was 5.1 days. Picks anchored to a sharp book
+// are unaffected at any distance.
+const FALLBACK_MAX_LOOKAHEAD_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_SCORED = 10;
 // Cached scan blobs are keyed by schema version: pre-patch blobs hold `edge`
 // in EV units and would render as probability points if reused.
@@ -1747,7 +1755,10 @@ async function scan() {
                             pinProb: key === sideKeys[0] ? iP(a.price) : iP(b.price),
                             consProb: consProb[key] ?? null };
             }
-          } else {
+          } else if (Date.parse(g.commence_time) - now.getTime() <= FALLBACK_MAX_LOOKAHEAD_MS) {
+            // No sharp reference. Allowed only for games close enough that the
+            // soft books are quoting seriously — see FALLBACK_MAX_LOOKAHEAD_MS.
+            //
             // PHASE 2: quotes carry their book, so the pool can be rebuilt
             // without whichever book is being priced against it.
             const pools = {};
