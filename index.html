@@ -393,15 +393,19 @@ function buildPrompts(candidates, hasSearch) {
 
 Architecture:
 Layer 1 has already scanned the market, de-vigged prices, filtered for a modeled price gap above the edge floor, ranked candidates by edge plus structural confidence, and produced ${candidates.length} finalists. These are price disagreements between books — not guaranteed wins, not known positive expected value, just mathematically identified gaps worth evaluating.
-Layer 2 must choose ONE of those finalists. Do not recommend anything outside the finalist pool. Do not re-run the sportsbook math. Your job is to decide which identified price gap looks most likely to be real — not a data artifact, stale quote, or a line that has already moved — after broader contextual reasoning.
+Layer 2 chooses ONE of those finalists, or declines. Do not recommend anything outside the finalist pool. Do not re-run the sportsbook math. Your job is to decide which identified price gap looks most likely to be real — not a data artifact, a price the book has stopped maintaining, or a line that has already moved — after broader contextual reasoning.
+
+Declining is a legitimate answer and is recorded as one. Return null for topPickId when no finalist looks worth taking. A forced choice among weak candidates is worse than no choice, and the log keeps the two apart.
+
+Two fields carry more than they look like they do. quoteAgeMinutes is how long since that bookmaker last moved this price; a large value means the book may no longer be standing behind it, which is sometimes exactly where the value is and sometimes a line that has already gone. daysToKickoff matters most when sharpReference is "Consensus fallback": with no sharp book quoting, a price far out is a placeholder rather than an opinion. Either field may be null, which means unknown — treat that as missing information, not as reassurance.
 
 Use all available reasoning sources freely: market structure, sport context, public-team bias, schedule spots, injury/lineup/weather risk, sharp-vs-soft-book implications, and whether the edge looks robust or fragile. ${searchInstr}
 
 Return ONLY valid JSON. No markdown, no code fences, no prose outside JSON.
 {
-  "topPickId": "exact id from the finalist pool",
-  "confidence": "HIGH|MEDIUM|LOW",
-  "reasoning": "concise explanation of why this finalist has the most defensible price gap — market structure, context, and what makes it more trustworthy than the alternatives",
+  "topPickId": "exact id from the finalist pool, or null to decline",
+  "confidence": "HIGH|MEDIUM|LOW — your confidence in this decision, which is scored against what the price actually did",
+  "reasoning": "why this finalist has the most defensible price gap — market structure, context, and what makes it more trustworthy than the alternatives. If declining, why none of them qualified",
   "risk": "main reason this could be wrong"
 }`;
 
@@ -423,7 +427,17 @@ Return ONLY valid JSON. No markdown, no code fences, no prose outside JSON.
     expectedValuePct:      c.edgeEV   != null ? +(c.edgeEV   * 100).toFixed(2) : null,
     structuralConfidence: c.confidence ?? null,
     sharpReference: c.sharp ? (c.pinnacleDeep ? 'Pinnacle deep market' : 'Pinnacle thin market') : 'Consensus fallback',
-    confidenceMeta: c.confMeta || null
+    // ENTRY SCHEMA 6: the panel was being asked to judge staleness with no
+    // staleness data in front of it. Null means unknown, not fresh.
+    quoteAgeMinutes: c.quoteAgeMs != null ? Math.round(c.quoteAgeMs / 60000) : null,
+    daysToKickoff: Number.isFinite(Date.parse(c.commenceTime))
+      ? +((Date.parse(c.commenceTime) - Date.now()) / 86400000).toFixed(1) : null,
+    // Named by unit, for the same reason edgeProbabilityPoints is: the raw blob
+    // made the panel guess whether 0.028 was a fraction, a percent or points.
+    booksQuotingThisSide:   c.confMeta?.nBooks ?? null,
+    bookDisagreementPoints: c.confMeta?.disp     != null ? +(c.confMeta.disp     * 100).toFixed(2) : null,
+    sharpImpliedProbPct:    c.confMeta?.pinProb  != null ? +(c.confMeta.pinProb  * 100).toFixed(2) : null,
+    softConsensusProbPct:   c.confMeta?.consProb != null ? +(c.confMeta.consProb * 100).toFixed(2) : null
   })), null, 2)}`;
 
   return { systemPrompt, userPrompt };
@@ -442,23 +456,34 @@ async function callModel(model, workerUrl, candidates) {
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('No JSON object found in AI response');
   const result = JSON.parse(match[0]);
-  if (!candidates.some(c => c.id === result.topPickId)) throw new Error('AI chose a pick outside the finalist pool');
+  // null is a real answer now. Anything else must be in the pool.
+  const chose = result.topPickId ?? null;
+  if (chose !== null && !candidates.some(c => c.id === chose))
+    throw new Error('AI chose a pick outside the finalist pool');
   return {
     modelId: model.id,
     modelName: model.name,
-    topPickId: result.topPickId,
+    topPickId: chose,
+    declined: chose === null,
     confidence: result.confidence || 'MEDIUM',
-    reasoning: result.reasoning || 'Selected this finalist as the strongest blend of math and context.',
+    reasoning: result.reasoning || (chose === null
+      ? 'Declined without giving a reason.'
+      : 'Selected this finalist as the strongest blend of math and context.'),
     risk: result.risk || ''
   };
 }
 function aiConsensus(modelResults) {
   const vals = Object.values(modelResults || {}).filter(Boolean);
   if (!vals.length) return null;
+  // A declension is not a vote for nothing — it is an abstention, and counting
+  // it as a vote would let three models be outvoted by silence.
+  const picked = vals.filter(r => r.topPickId);
+  const declined = vals.length - picked.length;
+  if (!picked.length) return { topPickId: null, votes: 0, total: vals.length, declined };
   const counts = {};
-  vals.forEach(r => counts[r.topPickId] = (counts[r.topPickId] || 0) + 1);
+  picked.forEach(r => counts[r.topPickId] = (counts[r.topPickId] || 0) + 1);
   const topId = Object.entries(counts).sort((a,b) => b[1] - a[1])[0]?.[0] || null;
-  return { topPickId: topId, votes: counts[topId] || 0, total: vals.length };
+  return { topPickId: topId, votes: counts[topId] || 0, total: vals.length, declined };
 }
 
 async function runAllModels(candidates, basePicks) {
@@ -509,8 +534,12 @@ async function runAllModels(candidates, basePicks) {
   const completedAt = new Date().toISOString();
   recordLayerBatch({ ...batch, completedAt, modelResults, errors:{...st.aiErrors},
     consensusId, aiChangedChoice, votes:consensus?.votes || 0, total:consensus?.total || 0,
+    declined:consensus?.declined || 0,
     eligible:!!consensusId && Date.parse(completedAt) < cutoff,
-    status:!consensusId ? 'failed' : Date.parse(completedAt) >= cutoff ? 'late' : 'complete' });
+    // A unanimous declension is an answer, not a breakdown. Logging it as
+    // 'failed' would have buried the panel's most informative output.
+    status: consensusId ? (Date.parse(completedAt) >= cutoff ? 'late' : 'complete')
+          : (consensus && consensus.declined === consensus.total) ? 'declined' : 'failed' });
   LS.set(PICKS_KEY(), next);
   } catch (e) { st.err = `AI results could not be saved: ${e.message}`; }
   finally { st.aiLoading = false; render(); }
@@ -839,6 +868,38 @@ function modelEvaluations(modelId) {
     if (close) out.push({clv_pp:100*cCLV(entry.line,close.closingLine)});
   }
   return out;
+}
+// Every model states HIGH / MEDIUM / LOW on every pick, and nothing ever
+// checked whether that rating tracked anything. It is the cheapest test of
+// whether the panel has judgement rather than just output.
+function confidenceEvaluations() {
+  const closes = capturedById(), out = [];
+  for (const b of studyBatches()) {
+    for (const [modelId, r] of Object.entries(b.modelResults || {})) {
+      if (!r || !r.topPickId) continue;                 // declines score nothing
+      const entry = b.candidates.find(p => p.id === r.topPickId);
+      const close = entry && closes.get(entry.id);
+      if (!close) continue;
+      out.push({ modelId, tier: String(r.confidence || 'MEDIUM').toUpperCase(),
+                 clv: cCLV(entry.line, close.closingLine), key: clvKey(entry) });
+    }
+  }
+  return out;
+}
+function confidenceSelfCalibrationRows() {
+  const rows = confidenceEvaluations();
+  return ['HIGH','MEDIUM','LOW'].map(t => {
+    const inT = rows.filter(r => r.tier === t);
+    const clvs = inT.map(r => r.clv);
+    return { label: t[0] + t.slice(1).toLowerCase(), n: inT.length,
+             avgClv: clvs.length ? clvs.reduce((a,c) => a+c, 0) / clvs.length : null };
+  });
+}
+function confidenceSelfCalibrationNote() {
+  const rows = confidenceEvaluations();
+  const games = new Set(rows.map(r => r.key)).size;
+  if (!rows.length) return 'Each model rates its own confidence on every pick. Nothing to score yet — this needs decisions whose closing price was captured.';
+  return `Each model's own confidence rating against what the price then did. High should beat Low; if it does not, the rating is decoration. ${rows.length} decision${rows.length===1?'':'s'} across ${games} distinct game${games===1?'':'s'} — a game several models all chose is counted once per model, so these are not independent observations.`;
 }
 function layerComparison() {
   const byId = capturedById();
@@ -2336,7 +2397,7 @@ function performanceView() {
 }
 function aiView() {
  const batches=layerBatches(),eligible=studyBatches();
- return `<section class="panel"><div class="panel-head"><div><h2>Prospective AI research</h2><p>${eligible.length} eligible completed batches · ${batches.length} total logged attempts</p></div><button class="button" onclick="${action('navigate','settings')}">Configure models</button></div><p class="quiet">Candidates and Layer 1's choice are saved before requests. Late responses and failed attempts stay in the log but are excluded from the comparison. Repeated events do not inflate the paired sample.</p></section>${aiPanel()||`<section class="panel">${emptyState('No eligible finalists','Run a market scan to create a current pool. AI setup is available in Settings.')}</section>`}${leaderboardPanel()||'<section class="panel"><h2>No model scores yet</h2><p class="quiet">Scores require a prospective selection and an eligible pregame close.</p></section>'}${layerComparisonPanel()||'<section class="panel"><h2>Layer 1 vs Layer 2</h2><p class="quiet">No eligible paired closes yet. A comparison will appear when both selected records have validated close evidence.</p></section>'}`;
+ return `<section class="panel"><div class="panel-head"><div><h2>Prospective AI research</h2><p>${eligible.length} scored · ${batches.filter(b=>b.status==='declined').length} declined by every model · ${batches.length} logged in total</p></div><button class="button" onclick="${action('navigate','settings')}">Configure models</button></div><p class="quiet">Candidates and Layer 1's choice are saved before requests. Late responses and failed attempts stay in the log but are excluded from the comparison. Repeated events do not inflate the paired sample.</p></section>${aiPanel()||`<section class="panel">${emptyState('No eligible finalists','Run a market scan to create a current pool. AI setup is available in Settings.')}</section>`}${leaderboardPanel()||'<section class="panel"><h2>No model scores yet</h2><p class="quiet">A model needs settled picks with a captured closing price before it gets a score.</p></section>'}${calibrationTable('Do the models know when they are right?',confidenceSelfCalibrationRows(),confidenceSelfCalibrationNote())}${layerComparisonPanel()||'<section class="panel"><h2>Layer 1 vs Layer 2</h2><p class="quiet">No eligible paired closes yet. A comparison will appear when both selected records have validated close evidence.</p></section>'}`;
 }
 function settingsView() {
  return `<div class="split"><div><section class="panel"><h2>Market connection</h2><p class="quiet">${AK?'An Odds API key is stored in this browser.':'No Odds API key is connected.'} Requests and close tracking use your provider quota.</p><label class="field">Odds API key<input id="key-inp" type="password" autocomplete="off" placeholder="Enter or replace key"></label><button class="button primary" style="margin-top:14px" onclick="EL.saveKey()">Save key & scan</button></section><section class="panel"><h2>Research settings</h2><div class="form-grid" style="margin-top:20px"><label class="field">How big a gap before a pick is worth recording (pts)<input type="number" min="0.5" max="5" step="0.1" value="${(minEdge()*100).toFixed(1)}" onchange="EL.updateNumber('minEdge',this.value)"></label><label class="field">How many picks to show on Today<input type="number" min="1" max="20" step="1" value="${topN()}" onchange="EL.updateNumber('topN',this.value)"></label></div>${explain('Lower or higher — which is better?','<p>Neither, and that is the point. Lower means more picks, more of them marginal. Higher means fewer and more selective. There is no provably right value.</p><p>Recording a thin pick costs nothing and is the only way to ever learn whether thin picks are worth taking. Alerting you about one costs attention and invites a bet. That is why the two have separate settings.</p>')}<label class="checkboxline"><input type="checkbox" ${maxOddsCap()!=null?'checked':''} onchange="EL.toggleOddsCap(this.checked)">Stop recommending long shots</label>${maxOddsCap()!=null?`<label class="field">Longest price still recommended (+odds)<input type="number" min="200" max="3000" step="100" value="${maxOddsCap()}" onchange="EL.updateNumber('maxOddsCap',this.value)"></label>`:''}<p class="quiet">Hiding a pick never deletes it. Everything found is still recorded and still counted in the tables on Performance — these settings only change what gets put in front of you. Changes take effect on the next scan.</p><button class="button" onclick="EL.setBankroll()">${st.bankroll?'Bankroll: $'+st.bankroll+' · edit':'Set bankroll'}</button></section></div><div><section class="panel"><h2>AI connection</h2><p class="quiet">Your existing Worker holds the provider keys. The secret is kept in this browser and is not included in backups.</p><label class="field">Worker URL<input type="url" value="${attribute(getWorkerUrl())}" placeholder="https://your-worker.workers.dev" onchange="EL.saveWorkerUrl(this.value)"></label><label class="field" style="margin-top:14px">Worker secret<input type="password" autocomplete="off" placeholder="Enter or replace secret" onchange="EL.saveWorkerSecret(this.value)"></label><div style="margin-top:18px">${Object.entries(MODELS).map(([id,m])=>`<label class="checkboxline"><input type="checkbox" ${getAiModels().includes(id)?'checked':''} onchange="EL.toggleAiModel('${id}',this.checked)">${esc(m.name)}</label>`).join('')}</div></section><section class="panel"><h2>Backup & restore</h2><p class="quiet">${st.history.length} history records and ${st.pending.length} pending records in this browser. A backup on your Mac does not include records saved only on your phone.</p><div class="record-actions"><button class="button primary" onclick="EL.exportBackup()">Download backup</button><label class="button">Restore backup<input aria-label="Restore backup file" type="file" accept="application/json" style="max-width:180px" onchange="EL.importBackup(this.files[0])"></label></div><p class="quiet">Restoring replaces this browser's dataset after confirmation. Use your phone backup to recover phone records. API keys and Worker secrets must be re-entered on a new device.</p></section></div></div>`;
