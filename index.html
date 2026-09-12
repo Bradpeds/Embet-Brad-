@@ -396,9 +396,11 @@ function buildPrompts(candidates, hasSearch) {
 
 Layer 1 scans sportsbooks for price disagreements and hands you its ${candidates.length} strongest candidates with the numbers behind them. That arithmetic is sound — de-vigged prices, a fair-value estimate, how far the offered price sits from it, how much the books disagree, how long since this one moved. Don't redo it.
 
-Your job is what the arithmetic can't see. Matchup dynamics, roster and lineup changes, injuries, rest and travel, weather, situational spots, how this particular book prices this particular kind of game — anything specific to this matchup that makes one of these prices more wrong, or less wrong, than the numbers suggest.
+Your job is to find what hasn't been priced in yet. Go looking: matchup dynamics, roster and lineup changes, injuries, rest and travel, weather, situational spots, how this particular book prices this particular kind of game. Something current and specific about this matchup that the price does not reflect.
 
-Pick the one you would actually take. Decline if none of them are worth it.
+Compare the candidates against each other rather than judging each alone. Weighing them side by side is where the useful thinking usually is, and the comparison is worth as much as the pick.
+
+Then take the one you would actually back. Decline if none of them are worth it.
 
 ${searchInstr}
 
@@ -407,7 +409,7 @@ Return ONLY valid JSON. No markdown, no code fences, no prose outside JSON.
   "topPickId": "id from the pool, or null to decline",
   "confidence": "HIGH|MEDIUM|LOW",
   "gapExplanation": "INATTENTION|INFORMATION|UNCLEAR — your read on why this book is out of line: it hasn't looked, or it's last to know. null when declining",
-  "reasoning": "what you saw that the numbers didn't",
+  "reasoning": "what you found that isn't in the price yet, and how the candidates compared",
   "risk": "what would make this wrong"
 }`;
 
@@ -631,7 +633,7 @@ function leaderboardPanel() {
     return `<div class="ai-pick-row">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <strong>${esc(data.modelName || id)}</strong>
-        ${bdg(statusCls, statusTxt)}
+        <span>${MODELS[id]?.hasSearch ? bdg('info','live search') : bdg('neutral','no live data')} ${bdg(statusCls, statusTxt)}</span>
       </div>
       <div style="color:var(--text3);margin-top:2px">
         ${studyBatches().filter(b => b.modelResults?.[id]).length} prospective selections &middot; ${evaluated.length} settled${hasEnough ? ` &middot; avg CLV ${fCLV(avgCLV/100)}` : ''}
@@ -644,6 +646,7 @@ function leaderboardPanel() {
     <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:10px">
       Tracks prospective AI selections against an observed pregame price proxy. Older AI records remain in backups but do not receive scores.
       A model needs ${MIN_SCORED} eligible scored picks before it gets a status label -- below that, it's too small a sample to mean anything.
+      Models are marked by whether they can search. Only some can go and check what has changed since training; the rest are reasoning from what they already knew. If that distinction matters, it will show up here as a gap between the two groups rather than as an assumption made in advance.
     </div>
     ${rows}
   </div>`;
