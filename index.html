@@ -386,27 +386,29 @@ function finalistPoolFromPicks(picks) {
 }
 function buildPrompts(candidates, hasSearch) {
   const searchInstr = hasSearch
-    ? 'You may use live search if your runtime supports it. Check only high-leverage context that could invalidate or strengthen a mathematically identified edge: injuries, lineups, weather, starting pitchers/goalies, schedule spots, and material line movement.'
-    : 'Use your broader learned context and reasoning patterns, but do not invent live news. Treat missing live injury/lineup/weather data as uncertainty, not evidence.';
+    ? 'Search freely for anything that changes the picture: injuries, lineups, starting pitchers or goalies, weather, travel and rest, line movement elsewhere. It can point either way — toward a pick or away from one.'
+    : 'You have no live feed, so do not state recent news as fact. Everything else you know about these teams, this sport, and how books price them is fair game.';
 
-  const systemPrompt = `You are Layer 2 of emBET: an AI adjudication panel sitting ABOVE the math, not replacing it.
+  // Kept deliberately short. A long prompt turns a strong model into a
+  // checklist-follower; the point of this layer is the judgement that does not
+  // fit in a rulebook.
+  const systemPrompt = `You are Layer 2 of emBET.
 
-Architecture:
-Layer 1 has already scanned the market, de-vigged prices, filtered for a modeled price gap above the edge floor, ranked candidates by edge plus structural confidence, and produced ${candidates.length} finalists. These are price disagreements between books — not guaranteed wins, not known positive expected value, just mathematically identified gaps worth evaluating.
-Layer 2 chooses ONE of those finalists, or declines. Do not recommend anything outside the finalist pool. Do not re-run the sportsbook math. Your job is to decide which identified price gap looks most likely to be real — not a data artifact, a price the book has stopped maintaining, or a line that has already moved — after broader contextual reasoning.
+Layer 1 scans sportsbooks for price disagreements and hands you its ${candidates.length} strongest candidates with the numbers behind them. That arithmetic is sound — de-vigged prices, a fair-value estimate, how far the offered price sits from it, how much the books disagree, how long since this one moved. Don't redo it.
 
-Declining is a legitimate answer and is recorded as one. Return null for topPickId when no finalist looks worth taking. A forced choice among weak candidates is worse than no choice, and the log keeps the two apart.
+Your job is what the arithmetic can't see. Matchup dynamics, roster and lineup changes, injuries, rest and travel, weather, situational spots, how this particular book prices this particular kind of game — anything specific to this matchup that makes one of these prices more wrong, or less wrong, than the numbers suggest.
 
-Two fields carry more than they look like they do. quoteAgeMinutes is how long since that bookmaker last moved this price; a large value means the book may no longer be standing behind it, which is sometimes exactly where the value is and sometimes a line that has already gone. daysToKickoff matters most when sharpReference is "Consensus fallback": with no sharp book quoting, a price far out is a placeholder rather than an opinion. Either field may be null, which means unknown — treat that as missing information, not as reassurance.
+Pick the one you would actually take. Decline if none of them are worth it.
 
-Use all available reasoning sources freely: market structure, sport context, public-team bias, schedule spots, injury/lineup/weather risk, sharp-vs-soft-book implications, and whether the edge looks robust or fragile. ${searchInstr}
+${searchInstr}
 
 Return ONLY valid JSON. No markdown, no code fences, no prose outside JSON.
 {
-  "topPickId": "exact id from the finalist pool, or null to decline",
-  "confidence": "HIGH|MEDIUM|LOW — your confidence in this decision, which is scored against what the price actually did",
-  "reasoning": "why this finalist has the most defensible price gap — market structure, context, and what makes it more trustworthy than the alternatives. If declining, why none of them qualified",
-  "risk": "main reason this could be wrong"
+  "topPickId": "id from the pool, or null to decline",
+  "confidence": "HIGH|MEDIUM|LOW",
+  "gapExplanation": "INATTENTION|INFORMATION|UNCLEAR — your read on why this book is out of line: it hasn't looked, or it's last to know. null when declining",
+  "reasoning": "what you saw that the numbers didn't",
+  "risk": "what would make this wrong"
 }`;
 
   const userPrompt = `Top ${candidates.length} math-filtered finalists:\n${JSON.stringify(candidates.map((c, i) => ({
@@ -466,6 +468,9 @@ async function callModel(model, workerUrl, candidates) {
     topPickId: chose,
     declined: chose === null,
     confidence: result.confidence || 'MEDIUM',
+    gapExplanation: chose === null ? null
+      : (['INATTENTION','INFORMATION','UNCLEAR'].includes(String(result.gapExplanation).toUpperCase())
+          ? String(result.gapExplanation).toUpperCase() : 'UNCLEAR'),
     reasoning: result.reasoning || (chose === null
       ? 'Declined without giving a reason.'
       : 'Selected this finalist as the strongest blend of math and context.'),
@@ -495,7 +500,12 @@ async function runAllModels(candidates, basePicks) {
   candidates = JSON.parse(JSON.stringify(candidates));
   const requestedAt = new Date().toISOString();
   const cutoff = Math.min(...candidates.map(p => Date.parse(p.commenceTime)));
-  const batch = { batchKey:uid(), schemaVersion:4, requestedAt,
+  // schemaVersion stays 4 on purpose: bumping it would drop every existing
+  // eligible batch out of studyBatches() and cost the leaderboard its whole
+  // sample. promptVersion records the change without throwing away the past.
+  //   1 — the long, heavily-constrained prompt
+  //   2 — short brief, room to reason
+  const batch = { batchKey:uid(), schemaVersion:4, promptVersion:2, requestedAt,
     candidates, layer1TopId:candidates[0].id, status:'requested', eligible:false,
     settings:JSON.parse(JSON.stringify(st.settings)), models:activeIds.map(id => ({...MODELS[id]})) };
   recordLayerBatch(batch);
@@ -579,6 +589,7 @@ function aiPanel() {
         <div><strong>${esc(r.modelName)}</strong> chose <strong>${esc(p?.bet || r.topPickId)}</strong></div>
         ${bdg(r.confidence === 'HIGH' ? 'success' : r.confidence === 'LOW' ? 'warning' : 'info', r.confidence)}
       </div>
+      ${r.gapExplanation ? `<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${esc(r.gapExplanation === 'INATTENTION' ? 'reads as inattention' : r.gapExplanation === 'INFORMATION' ? 'reads as news the book missed' : 'unclear which')}</div>` : ''}
       <div style="color:var(--text2)">${esc(r.reasoning)}</div>
       ${r.risk ? `<div style="color:var(--text3);margin-top:4px">Risk: ${esc(r.risk)}</div>` : ''}
     </div>`;
@@ -881,6 +892,7 @@ function confidenceEvaluations() {
       const close = entry && closes.get(entry.id);
       if (!close) continue;
       out.push({ modelId, tier: String(r.confidence || 'MEDIUM').toUpperCase(),
+                 gap: r.gapExplanation ? String(r.gapExplanation).toUpperCase() : null,
                  clv: cCLV(entry.line, close.closingLine), key: clvKey(entry) });
     }
   }
@@ -894,6 +906,24 @@ function confidenceSelfCalibrationRows() {
     return { label: t[0] + t.slice(1).toLowerCase(), n: inT.length,
              avgClv: clvs.length ? clvs.reduce((a,c) => a+c, 0) / clvs.length : null };
   });
+}
+// The panel's read on WHY a gap exists, against what the price then did.
+// Inattention should beat information: one is a book that has not looked, the
+// other is a book that is last to know. If the two come out level, the panel
+// cannot tell them apart and the field is decoration.
+function gapExplanationRows() {
+  const rows = confidenceEvaluations().filter(r => r.gap);
+  return ['INATTENTION','INFORMATION','UNCLEAR'].map(g => {
+    const inG = rows.filter(r => r.gap === g);
+    const clvs = inG.map(r => r.clv);
+    return { label: g[0] + g.slice(1).toLowerCase(), n: inG.length,
+             avgClv: clvs.length ? clvs.reduce((a,c) => a+c, 0) / clvs.length : null };
+  });
+}
+function gapExplanationNote() {
+  const rows = confidenceEvaluations().filter(r => r.gap);
+  if (!rows.length) return 'The panel now says whether it thinks a gap exists because the book was not paying attention, or because it is the last to know. Nothing scored yet.';
+  return `Inattention should beat information — the first is a book that has not looked, the second is a book behind the news. Level rows mean the panel cannot tell them apart. ${rows.length} decision${rows.length===1?'':'s'} scored.`;
 }
 function confidenceSelfCalibrationNote() {
   const rows = confidenceEvaluations();
@@ -2397,7 +2427,7 @@ function performanceView() {
 }
 function aiView() {
  const batches=layerBatches(),eligible=studyBatches();
- return `<section class="panel"><div class="panel-head"><div><h2>Prospective AI research</h2><p>${eligible.length} scored · ${batches.filter(b=>b.status==='declined').length} declined by every model · ${batches.length} logged in total</p></div><button class="button" onclick="${action('navigate','settings')}">Configure models</button></div><p class="quiet">Candidates and Layer 1's choice are saved before requests. Late responses and failed attempts stay in the log but are excluded from the comparison. Repeated events do not inflate the paired sample.</p></section>${aiPanel()||`<section class="panel">${emptyState('No eligible finalists','Run a market scan to create a current pool. AI setup is available in Settings.')}</section>`}${leaderboardPanel()||'<section class="panel"><h2>No model scores yet</h2><p class="quiet">A model needs settled picks with a captured closing price before it gets a score.</p></section>'}${calibrationTable('Do the models know when they are right?',confidenceSelfCalibrationRows(),confidenceSelfCalibrationNote())}${layerComparisonPanel()||'<section class="panel"><h2>Layer 1 vs Layer 2</h2><p class="quiet">No eligible paired closes yet. A comparison will appear when both selected records have validated close evidence.</p></section>'}`;
+ return `<section class="panel"><div class="panel-head"><div><h2>Prospective AI research</h2><p>${eligible.length} scored · ${batches.filter(b=>b.status==='declined').length} declined by every model · ${batches.length} logged in total</p></div><button class="button" onclick="${action('navigate','settings')}">Configure models</button></div><p class="quiet">Candidates and Layer 1's choice are saved before requests. Late responses and failed attempts stay in the log but are excluded from the comparison. Repeated events do not inflate the paired sample.</p></section>${aiPanel()||`<section class="panel">${emptyState('No eligible finalists','Run a market scan to create a current pool. AI setup is available in Settings.')}</section>`}${leaderboardPanel()||'<section class="panel"><h2>No model scores yet</h2><p class="quiet">A model needs settled picks with a captured closing price before it gets a score.</p></section>'}${calibrationTable('Do the models know when they are right?',confidenceSelfCalibrationRows(),confidenceSelfCalibrationNote())}${calibrationTable('Inattention, or last to know?',gapExplanationRows(),gapExplanationNote())}${layerComparisonPanel()||'<section class="panel"><h2>Layer 1 vs Layer 2</h2><p class="quiet">No eligible paired closes yet. A comparison will appear when both selected records have validated close evidence.</p></section>'}`;
 }
 function settingsView() {
  return `<div class="split"><div><section class="panel"><h2>Market connection</h2><p class="quiet">${AK?'An Odds API key is stored in this browser.':'No Odds API key is connected.'} Requests and close tracking use your provider quota.</p><label class="field">Odds API key<input id="key-inp" type="password" autocomplete="off" placeholder="Enter or replace key"></label><button class="button primary" style="margin-top:14px" onclick="EL.saveKey()">Save key & scan</button></section><section class="panel"><h2>Research settings</h2><div class="form-grid" style="margin-top:20px"><label class="field">How big a gap before a pick is worth recording (pts)<input type="number" min="0.5" max="5" step="0.1" value="${(minEdge()*100).toFixed(1)}" onchange="EL.updateNumber('minEdge',this.value)"></label><label class="field">How many picks to show on Today<input type="number" min="1" max="20" step="1" value="${topN()}" onchange="EL.updateNumber('topN',this.value)"></label></div>${explain('Lower or higher — which is better?','<p>Neither, and that is the point. Lower means more picks, more of them marginal. Higher means fewer and more selective. There is no provably right value.</p><p>Recording a thin pick costs nothing and is the only way to ever learn whether thin picks are worth taking. Alerting you about one costs attention and invites a bet. That is why the two have separate settings.</p>')}<label class="checkboxline"><input type="checkbox" ${maxOddsCap()!=null?'checked':''} onchange="EL.toggleOddsCap(this.checked)">Stop recommending long shots</label>${maxOddsCap()!=null?`<label class="field">Longest price still recommended (+odds)<input type="number" min="200" max="3000" step="100" value="${maxOddsCap()}" onchange="EL.updateNumber('maxOddsCap',this.value)"></label>`:''}<p class="quiet">Hiding a pick never deletes it. Everything found is still recorded and still counted in the tables on Performance — these settings only change what gets put in front of you. Changes take effect on the next scan.</p><button class="button" onclick="EL.setBankroll()">${st.bankroll?'Bankroll: $'+st.bankroll+' · edit':'Set bankroll'}</button></section></div><div><section class="panel"><h2>AI connection</h2><p class="quiet">Your existing Worker holds the provider keys. The secret is kept in this browser and is not included in backups.</p><label class="field">Worker URL<input type="url" value="${attribute(getWorkerUrl())}" placeholder="https://your-worker.workers.dev" onchange="EL.saveWorkerUrl(this.value)"></label><label class="field" style="margin-top:14px">Worker secret<input type="password" autocomplete="off" placeholder="Enter or replace secret" onchange="EL.saveWorkerSecret(this.value)"></label><div style="margin-top:18px">${Object.entries(MODELS).map(([id,m])=>`<label class="checkboxline"><input type="checkbox" ${getAiModels().includes(id)?'checked':''} onchange="EL.toggleAiModel('${id}',this.checked)">${esc(m.name)}</label>`).join('')}</div></section><section class="panel"><h2>Backup & restore</h2><p class="quiet">${st.history.length} history records and ${st.pending.length} pending records in this browser. A backup on your Mac does not include records saved only on your phone.</p><div class="record-actions"><button class="button primary" onclick="EL.exportBackup()">Download backup</button><label class="button">Restore backup<input aria-label="Restore backup file" type="file" accept="application/json" style="max-width:180px" onchange="EL.importBackup(this.files[0])"></label></div><p class="quiet">Restoring replaces this browser's dataset after confirmation. Use your phone backup to recover phone records. API keys and Worker secrets must be re-entered on a new device.</p></section></div></div>`;
