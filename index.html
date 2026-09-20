@@ -806,10 +806,35 @@ function flagCard(o) {
 // and each underlying wager contributes exactly one row.
 // ---------------------------------------------------------------------------
 const CLOSE_WINDOW_MS = 5 * 60 * 1000;
+// The v1/v2 windows tested how recently the BOOK moved, not how recently we
+// looked -- so a book that set its price 20 minutes out and stopped could never
+// produce a close. v3 admits any quote strictly before kickoff and records how
+// old it was, leaving the real cutoff to be read off the close-age calibration
+// table rather than guessed. This ceiling exists only to refuse a line that is
+// plainly dead; it is not a freshness opinion.
+const CLOSE_AGE_MAX_MS = 6 * 60 * 60 * 1000;
 const validOdds = n => Number.isFinite(n) && Math.abs(n) >= 100;
 function isCapturedClose(p) {
   const e = p?.closeEvidence, start = Date.parse(p?.commenceTime);
   const quote = Date.parse(e?.quoteAt), observed = Date.parse(e?.observedAt);
+  if (e?.method === 'observed-pregame-v3') {
+    // Same evidence chain as v1 -- price matches, quote precedes observation,
+    // observation precedes kickoff, identity fields agree. The only relaxation
+    // is the window. ageMs is checked against the timestamps but with a second
+    // of tolerance and only when present: it is recorded data, not the gate,
+    // and refusing an observation over sub-second rounding between two
+    // producers would be the same silent-discard failure this patch removes.
+    // The window itself is enforced on start - quote, which cannot be spoofed
+    // without also failing the identity and ordering checks above.
+    const ageOk = !Number.isFinite(e.ageMs) || Math.abs(e.ageMs - (start - quote)) <= 1000;
+    return p.closeSource === 'captured' &&
+      validOdds(p.line) && validOdds(p.closingLine) && p.closingLine === e.price &&
+      Number.isFinite(start) && Number.isFinite(quote) && Number.isFinite(observed) &&
+      quote <= observed && observed < start && quote < start &&
+      ageOk && start - quote <= CLOSE_AGE_MAX_MS &&
+      Date.now() >= start && e.gameId === p.gameId && e.mkt === p.mkt &&
+      e.bet === p.bet && e.book === p.book;
+  }
   return !!e && p.closeSource === 'captured' && e.method === 'observed-pregame-v1' &&
     validOdds(p.line) && validOdds(p.closingLine) && p.closingLine === e.price &&
     Number.isFinite(start) && Number.isFinite(quote) && Number.isFinite(observed) &&
@@ -835,7 +860,10 @@ function clvExcludedCounts() {
   let legacy = 0, fallback = 0, duplicates = 0;
   const seen = new Set();
   for (const p of [...st.pending, ...st.history]) {
-    if (!p || p.closingLine == null) continue;
+    if (!p) continue;
+    // A fallback no longer occupies closingLine, so the old null check would
+    // hide it -- and a leak you stop counting is a leak you stop fixing.
+    if (p.closingLine == null && p.closeSource !== 'fallback') continue;
     if (p.closeSource === 'legacy')   { legacy++;   continue; }
     if (p.closeSource === 'fallback') { fallback++; continue; }
     if (p.closeSource === 'captured') {
@@ -1142,6 +1170,31 @@ function confidenceCalibrationCard() {
       ${body}
     </tbody></table>
   </div>`;
+}
+// How stale was the quote when it became the close? The v1 rule asserted that
+// anything past five minutes was worthless; it never checked. This does.
+const CLOSE_AGE_BUCKETS = [
+  { lo: 0,            hi: 5*60*1000,      label: 'Under 5 min' },
+  { lo: 5*60*1000,    hi: 30*60*1000,     label: '5–30 min' },
+  { lo: 30*60*1000,   hi: 2*60*60*1000,   label: '30 min – 2 h' },
+  { lo: 2*60*60*1000, hi: Infinity,       label: 'Over 2 h' }
+];
+function closeAgeRows() {
+  const tracked = clvObservations().filter(p => {
+    const e = p.closeEvidence;
+    return e && (Number.isFinite(e.ageMs) || Number.isFinite(Date.parse(e.quoteAt)));
+  });
+  const ageOf = p => {
+    const e = p.closeEvidence;
+    if (Number.isFinite(e.ageMs)) return e.ageMs;
+    return Date.parse(p.commenceTime) - Date.parse(e.quoteAt);
+  };
+  return CLOSE_AGE_BUCKETS.map(b => {
+    const inB = tracked.filter(p => { const a = ageOf(p); return a >= b.lo && a < b.hi; });
+    const clvs = inB.map(p => cCLV(p.line, p.closingLine));
+    return { label: b.label, n: inB.length,
+             avgClv: clvs.length ? clvs.reduce((a,c)=>a+c,0)/clvs.length : null };
+  });
 }
 function sportCalibrationRows() {
   const tracked = clvObservations().filter(p => p.sport);
@@ -1714,9 +1767,15 @@ function captureClosing(g) {
     if (!out || !validOdds(out.price) || !Number.isFinite(qt) || qt > now) continue;
     p.latestLine = out.price;
     p.latestLineAt = new Date(now).toISOString();
-    if (start - qt <= CLOSE_WINDOW_MS && (!p.preClose || qt >= Date.parse(p.preClose.quoteAt))) {
-      p.preClose = { method:'observed-pregame-v1', quoteAt,
+    // Keep the latest pregame quote seen, whatever its age. Recording the age
+    // is what makes this honest: a 40-minute-old close is evidence of something
+    // weaker than a 1-minute-old one, and the calibration table can say how much
+    // weaker. Discarding it outright -- the old behaviour -- threw away real
+    // observations and left no trace that they had existed.
+    if (start - qt <= CLOSE_AGE_MAX_MS && (!p.preClose || qt >= Date.parse(p.preClose.quoteAt))) {
+      p.preClose = { method:'observed-pregame-v3', quoteAt,
         observedAt:new Date(now).toISOString(), price:out.price,
+        ageMs: start - qt,
         gameId:p.gameId, mkt:p.mkt, bet:p.bet, book:p.book };
     }
     changed = true;
@@ -1727,7 +1786,11 @@ function finalizeStalePending() {
   const now = Date.now();
   let changed = false;
   for (const p of [...st.pending, ...st.history]) {
-    if (p.closingLine != null) continue;
+    // A fallback now leaves closingLine null so a later server capture can still
+    // land in that slot -- which means this guard has to recognise the fallback
+    // explicitly. Without it the record re-enters the loop on every 60-second
+    // pass, gets re-stamped, and pushes to D1 each cycle.
+    if (p.closingLine != null || p.closeSource === 'fallback') continue;
     const start = Date.parse(p.commenceTime);
     if (!Number.isFinite(start) || now < start) continue;
     const candidate = { ...p, closingLine:p.preClose?.price,
@@ -1737,8 +1800,12 @@ function finalizeStalePending() {
       p.closeEvidence = { ...p.preClose };
       p.closeSource = 'captured';
     } else if (now - start >= FINALIZE_GRACE_MS) {
-      // Preserve the old fallback display, but never score it.
-      p.closingLine = p.latestLine ?? p.line;
+      // The fallback used to be written into closingLine, which made the miss
+      // permanent: captureClosing() skips anything with closingLine set, and the
+      // value syncs up to D1 where it blocks the Worker's own capture pass from
+      // ever landing. A strict client was poisoning a more permissive server.
+      // The display value now lives in its own field and the slot stays open.
+      p.fallbackLine = p.latestLine ?? p.line;
       p.closeSource = 'fallback';
     } else continue;
     p.closingAt = new Date(now).toISOString();
@@ -2258,6 +2325,12 @@ async function maintainCloses() {
 }
 
 function maybeAutoBackup() {
+  // This used to run inside init(), before the sync module's first pull, so an
+  // automatic backup captured whatever this browser held BEFORE contacting D1 --
+  // systematically smaller than the real dataset. Measured 2026-09-20: the
+  // auto-backup held 11 captured closes, the page six minutes later showed 66.
+  // When sync is configured, the sync cycle calls this after a successful pull.
+  if (LS.get('embet_sync_url') && LS.get('embet_sync_secret') && !window.__embetSynced) return;
   const lastBackupAt = LS.get('embet_last_backup');
   const hasData = st.history.length > 0 || st.pending.length > 0;
   const ageDays = lastBackupAt ? (Date.now() - new Date(lastBackupAt).getTime()) / 86400000 : Infinity;
@@ -2405,6 +2478,7 @@ function closeLabel(p) {
    const c = cCLV(p.line, p.closingLine);
    return `Market moved ${(Math.abs(c)*100).toFixed(1)} pts ${c >= 0 ? 'toward you' : 'against you'}`;
  }
+ if (p.closeSource === 'fallback') return 'Closing price missed — last seen price shown, not counted';
  if (p.closingLine != null) return 'Closing price could not be verified — not counted';
  // A game that has not started yet has not failed to do anything. The old copy
  // read "Close not captured" here, which describes a problem that has not
@@ -2426,7 +2500,7 @@ function detailView() {
 }
 function performanceView() {
  const d=recordSummary(),rows=d.closes,x=clvExcludedCounts();const mean=rows.length?rows.reduce((a,p)=>a+cCLV(p.line,p.closingLine),0)/rows.length:null;const se=eventClusterSE(rows,mean);
- return summaryCards()+`<section class="panel"><div class="panel-head"><div><h2>Is this actually working?</h2><p>How far prices moved after you took them — the same book, before and after</p></div></div><div class="detail-grid"><div><small>Average move in your favour</small><strong>${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Bets measured</small><strong>${rows.length}</strong></div><div><small>Not counted</small><strong>${x.total}</strong></div></div>${explain('What counts as evidence here, and what does not?','<p>A bet counts only if the app actually saw the price shortly before kickoff, with a timestamp proving when. Anything else is excluded — including prices recorded before the app tracked where a price came from, and second copies of the same bet taken at another sportsbook.</p><p>None of that removes a bet from your history or changes a win or a loss. It only decides what is allowed to be used as proof.</p>')}<p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by event.`:`No margin of error yet — that needs at least 30 different games measured, and there ${rows.length === 1 ? 'is 1' : 'are ' + rows.length} so far. Treat the average above as a direction, not a result.`}</p><p class="quiet">Not counted: ${x.legacy} recorded before the app tracked where a closing price came from · ${x.fallback} where no price was seen in time · ${x.duplicates} the same bet at a second book. Your results are unaffected.</p><p class="quiet">${sampleNote(rows.length)}</p></section><div class="split"><div>${calibrationTable('Does a bigger gap pay off?',calibrationRows(),'If the rows lower down move more, the gap number is measuring something real. Flat or backwards means it is not — yet.')}${calibrationTable('Is the confidence score worth anything?',confidenceCalibrationRows(),'High confidence should move more than low. If it does not, the score is not earning the weight it carries in the ranking.')}</div><div>${calibrationTable('Does the price level matter?',oddsCalibrationRows(),'The maths behind the fair price is most reliable near even money. This checks whether that holds in your own results.')}${calibrationTable('Which sports are working?',sportCalibrationRows(),'The sharp reference book is deepest in the major leagues. If the thinner sports drag the average down, that is a reason to weight or drop them.')}</div></div><p class="section-note">Every table above needs a few hundred measured bets before it reads clearly. Older records stay saved but some cannot be used in these tables, because the app could not prove their entry figures were never edited. The profit figure assumes a flat $10 a bet and is not your sportsbook balance.</p>`;
+ return summaryCards()+`<section class="panel"><div class="panel-head"><div><h2>Is this actually working?</h2><p>How far prices moved after you took them — the same book, before and after</p></div></div><div class="detail-grid"><div><small>Average move in your favour</small><strong>${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Bets measured</small><strong>${rows.length}</strong></div><div><small>Not counted</small><strong>${x.total}</strong></div></div>${explain('What counts as evidence here, and what does not?','<p>A bet counts only if the app actually saw the price shortly before kickoff, with a timestamp proving when. Anything else is excluded — including prices recorded before the app tracked where a price came from, and second copies of the same bet taken at another sportsbook.</p><p>None of that removes a bet from your history or changes a win or a loss. It only decides what is allowed to be used as proof.</p>')}<p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by event.`:`No margin of error yet — that needs at least 30 different games measured, and there ${rows.length === 1 ? 'is 1' : 'are ' + rows.length} so far. Treat the average above as a direction, not a result.`}</p><p class="quiet">Not counted: ${x.legacy} recorded before the app tracked where a closing price came from · ${x.fallback} where no price was seen in time · ${x.duplicates} the same bet at a second book. Your results are unaffected.</p><p class="quiet">${sampleNote(rows.length)}</p></section><div class="split"><div>${calibrationTable('Does a bigger gap pay off?',calibrationRows(),'If the rows lower down move more, the gap number is measuring something real. Flat or backwards means it is not — yet.')}${calibrationTable('Is the confidence score worth anything?',confidenceCalibrationRows(),'High confidence should move more than low. If it does not, the score is not earning the weight it carries in the ranking.')}</div><div>${calibrationTable('Does the price level matter?',oddsCalibrationRows(),'The maths behind the fair price is most reliable near even money. This checks whether that holds in your own results.')}${calibrationTable('Which sports are working?',sportCalibrationRows(),'The sharp reference book is deepest in the major leagues. If the thinner sports drag the average down, that is a reason to weight or drop them.')}${calibrationTable('Does a stale close still count for anything?',closeAgeRows(),'How long before kickoff the book last moved the price that became your close. If the older rows hold up, a tight capture window was throwing away good evidence. If they fall away, this table says where the real cutoff belongs.')}</div></div><p class="section-note">Every table above needs a few hundred measured bets before it reads clearly. Older records stay saved but some cannot be used in these tables, because the app could not prove their entry figures were never edited. The profit figure assumes a flat $10 a bet and is not your sportsbook balance.</p>`;
 }
 function aiView() {
  const batches=layerBatches(),eligible=studyBatches();
@@ -2694,6 +2768,11 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
       persistRecordsRaw();
       commitSigs(protect);          // protected ids stay dirty on purpose
       LS.set(SYNC_REV, res.rev);
+      // Records are now current, so an automatic backup is finally safe to take.
+      if (!window.__embetSynced) {
+        window.__embetSynced = true;
+        try { maybeAutoBackup(); } catch (e) { /* banner reminder still covers it */ }
+      }
       if (protect.size) setTimeout(() => syncNow({ silent: true }), 800);
       S.last = new Date().toISOString();
     } catch (e) {
