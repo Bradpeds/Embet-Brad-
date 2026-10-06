@@ -458,7 +458,7 @@ async function callModel(model, workerUrl, candidates) {
   if (!r.ok || d.error) throw new Error(d.error || `Worker returned ${r.status}`);
   const raw = String(d.text || d.content || d.response || '').replace(/```json/gi, '').replace(/```/g, '').trim();
   const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('No JSON object found in AI response');
+  if (!match) throw new Error('No JSON. Got: ' + (raw.slice(0,300) || '(empty)') + ' | keys: ' + Object.keys(d).join(','));
   const result = JSON.parse(match[0]);
   // null is a real answer now. Anything else must be in the pool.
   const chose = result.topPickId ?? null;
