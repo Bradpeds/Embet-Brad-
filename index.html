@@ -456,7 +456,11 @@ async function callModel(model, workerUrl, candidates) {
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok || d.error) throw new Error(d.error || `Worker returned ${r.status}`);
-  const raw = String(d.text || d.content || d.response || '').replace(/```json/gi, '').replace(/```/g, '').trim();
+  // Claude (esp. with web search) can come back as a list of content blocks, not a string.
+  const pull = v => typeof v === 'string' ? v
+    : Array.isArray(v) ? v.map(b => typeof b === 'string' ? b : (b && b.type !== 'tool_use' && typeof b.text === 'string' ? b.text : '')).join('\n')
+    : (v && typeof v.text === 'string' ? v.text : '');
+  const raw = (pull(d.text) || pull(d.content) || pull(d.response)).replace(/```json/gi, '').replace(/```/g, '').trim();
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('No JSON. Got: ' + (raw.slice(0,300) || '(empty)') + ' | keys: ' + Object.keys(d).join(','));
   const result = JSON.parse(match[0]);
