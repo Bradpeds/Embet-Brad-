@@ -2514,9 +2514,21 @@ function closeLabel(p) {
  // happened.
  return Date.parse(p.commenceTime) > Date.now() ? 'Waiting for kickoff' : 'Closing price missed';
 }
+// Edge and estimated win chance on every Tracker row, so they no longer need a trip to Details.
+// Both come from the saved entry, which is never rewritten. Edge is a probability gap, the same
+// unit as the closing-price movement the app measures against. The win figure is the model's
+// estimate (a de-vigged reference price), not an observed rate, so it is labelled that way.
+function trackerOddsLine(p) {
+ const edge=Number.isFinite(p.edge)?fGap(p.edge):'—';
+ const win=Number.isFinite(p.fairProb)?`${(100*p.fairProb).toFixed(0)}%`:'—';
+ const notes=[];
+ if(p.sharp===false)notes.push('no Pinnacle');
+ if(p.entrySchema<4)notes.push('legacy');
+ return `<p>Edge <b>${edge}</b> · Model win est. <b>${win}</b>${notes.length?` · <span class="quiet">${notes.join(' · ')}</span>`:''}</p>`;
+}
 function trackerView() {
  const rows=trackedRecords();
- return `<section class="panel"><div class="panel-head"><div><h2>Everything the scanner found</h2><p>${st.history.length} settled · ${st.pending.length} waiting · the price you got is never rewritten</p></div><button class="button" onclick="EL.exportBackup()">Back up</button></div><div class="pillbar" role="group" aria-label="Record status">${[['pending','Pending'],['placed','Placed results'],['none','No bet'],['all','All records']].map(([k,v])=>`<button aria-pressed="${ui.tracker===k}" onclick="${action('filter','tracker',k)}">${v}</button>`).join('')}</div><div class="tools">${searchControl('Find a saved record')}</div><p class="quiet">${rows.length} records. "Waiting" means the scanner is tracking it — not that you bet on it. Mark anything you did not back as "No bet" so your own record stays honest.</p>${rows.slice(0,ui.limit).map(p=>{const r=getRes(p.id)||p.result;return `<article class="record"><div><strong>${esc(p.bet)}</strong><p>${esc(p.game)}</p><p>${esc(p.book)} · Entry <b>${fO(p.line)}</b> · ${esc(fDT(p.commenceTime))}</p><span class="tag">${esc(closeLabel(p))}</span></div><div class="record-actions"><button class="textbutton" onclick="${action('detail',p.id)}">Details</button><button class="button" onclick="${action('openSettle',p.id)}">${r?({W:'Win',L:'Loss',P:'Push',N:'No bet'}[r]||'Review'):'Settle'}</button></div></article>`;}).join('')||emptyState('No matching records','Your saved records will appear here. You can restore a phone backup in Settings.','Open settings','openWorkspaceSettings')}${rows.length>ui.limit?`<button class="button" onclick="EL.loadMore()">Show more records</button>`:''}</section>`;
+ return `<section class="panel"><div class="panel-head"><div><h2>Everything the scanner found</h2><p>${st.history.length} settled · ${st.pending.length} waiting · the price you got is never rewritten</p></div><button class="button" onclick="EL.exportBackup()">Back up</button></div><div class="pillbar" role="group" aria-label="Record status">${[['pending','Pending'],['placed','Placed results'],['none','No bet'],['all','All records']].map(([k,v])=>`<button aria-pressed="${ui.tracker===k}" onclick="${action('filter','tracker',k)}">${v}</button>`).join('')}</div><div class="tools">${searchControl('Find a saved record')}</div><p class="quiet">${rows.length} records. "Waiting" means the scanner is tracking it — not that you bet on it. Mark anything you did not back as "No bet" so your own record stays honest.</p>${rows.slice(0,ui.limit).map(p=>{const r=getRes(p.id)||p.result;return `<article class="record"><div><strong>${esc(p.bet)}</strong><p>${esc(p.game)}</p><p>${esc(p.book)} · Entry <b>${fO(p.line)}</b> · ${esc(fDT(p.commenceTime))}</p>${trackerOddsLine(p)}<span class="tag">${esc(closeLabel(p))}</span></div><div class="record-actions"><button class="textbutton" onclick="${action('detail',p.id)}">Details</button><button class="button" onclick="${action('openSettle',p.id)}">${r?({W:'Win',L:'Loss',P:'Push',N:'No bet'}[r]||'Review'):'Settle'}</button></div></article>`;}).join('')||emptyState('No matching records','Your saved records will appear here. You can restore a phone backup in Settings.','Open settings','openWorkspaceSettings')}${rows.length>ui.limit?`<button class="button" onclick="EL.loadMore()">Show more records</button>`:''}</section>`;
 }
 function detailView() {
  const canonical=[...st.history,...st.pending].find(p=>p.id===ui.detailId);
