@@ -9,10 +9,13 @@ concurrency:
   group: embet-cron
   cancel-in-progress: false
 
+permissions:
+  contents: write   # the fair-close step commits to the `data` branch
+
 jobs:
   poke:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
       - name: Run the Worker's cron job
         env:
@@ -29,3 +32,38 @@ jobs:
                -H "Authorization: Bearer $SYNC_SECRET" \
                "$WORKER_URL/api/cron/run"
           echo
+
+      # Fair-close capture: Pinnacle's no-vig price just before kickoff, for
+      # every tracked pick. Runs even if the poke above failed.
+      - name: Check out collector
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: app
+          sparse-checkout: scripts
+
+      - name: Check out data branch
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          ref: data
+          path: data
+
+      - name: Collect fair closes
+        if: always()
+        env:
+          WORKER_URL: https://embet-data.bradpeds76.workers.dev
+          SYNC_SECRET: ${{ secrets.EMBET_SYNC_SECRET }}
+        run: node app/scripts/fair-close.mjs data/fairclose.json
+
+      - name: Save fair closes
+        if: always()
+        working-directory: data
+        run: |
+          if git diff --quiet -- fairclose.json; then echo "no change"; exit 0; fi
+          git config user.name "emBET cron"
+          git config user.email "actions@users.noreply.github.com"
+          git add fairclose.json
+          git commit -q -m "fair-close update"
+          git push -q origin HEAD:data

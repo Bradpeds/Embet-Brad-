@@ -372,17 +372,48 @@ function confidenceLabel(c) {
   const strongest = ranked[0], weakest = ranked[ranked.length - 1];
   return { tier, strongest: strongest.v >= 0.6 ? strongest.good : null, weakest: weakest.v < 0.5 ? weakest.bad : null };
 }
+// MODEL RULES (Nov 7 2026), from 407 captured closes:
+//  · Gaps above 2pp moved in our favour less than half as much as smaller ones
+//    (0.7pp vs 1.8pp), so for ranking a gap counts for at most 2pp. Among
+//    capped picks, closer Pinnacle/consensus agreement ranks first.
+//  · The confidence score did not separate good picks from bad on any measure,
+//    so it no longer affects ranking. It is still computed and stored.
+//  · Where Pinnacle and the soft-book consensus disagreed by 3pp or more, the
+//    price barely moved our way (0.4pp vs ~2pp), so those are not shown.
+//  · Caesars was the only book where prices moved against us. Paused for display.
+// None of this touches research tracking: every candidate is still recorded.
+const RANK_EDGE_KNEE = 0.02, RANK_EDGE_SHRINK = 0;
+const MAX_REF_DISAGREE = 0.03;
+const PAUSED_BOOKS = new Set(['caesars', 'williamhill_us']);
+function rankEdge(o) {
+  const e = Number.isFinite(o?.edgeProb) ? o.edgeProb : (o?.edge || 0);
+  return e <= RANK_EDGE_KNEE ? e : RANK_EDGE_KNEE + RANK_EDGE_SHRINK * (e - RANK_EDGE_KNEE);
+}
+function refDisagreement(o) {
+  const c = o?.confMeta?.consProb;
+  return (o?.sharp && c != null && Number.isFinite(o.fairProb)) ? Math.abs(o.fairProb - c) : null;
+}
+function pickHiddenReason(o) {
+  if (PAUSED_BOOKS.has(String(o?.book || '').toLowerCase().replace(/\s+/g, ''))) return 'paused book';
+  const d = refDisagreement(o);
+  if (d != null && d >= MAX_REF_DISAGREE) return 'Pinnacle and consensus disagree';
+  return null;
+}
+// Keep one row per game side: rows arrive best-first, so the first is the best price.
+function onePerSide(rows) {
+  const seen = new Set();
+  return rows.filter(p => { const k = clvKey(p); if (seen.has(k)) return false; seen.add(k); return true; });
+}
 function pickRankScore(o) {
-  const edgeNorm = CLAMP((o?.edge || 0) / SANITY_EDGE, 0, 1);
-  const c = (o?.confidence != null) ? o.confidence : (o?.confMeta ? quantConfidence(o).score : 0.5);
-  return 0.60 * edgeNorm + 0.40 * c;
+  // The disagreement term is a tie-breaker (at most 0.003pp), not a weight.
+  const d = refDisagreement(o);
+  return rankEdge(o) - 1e-3 * (d == null ? MAX_REF_DISAGREE : d);
 }
 function finalistPoolFromPicks(picks) {
   const pool = [...(picks?.researchFinalists || [...(picks?.near || []), ...(picks?.future || [])])]
-    .filter(p => p && !p.suspicious && Date.parse(p.commenceTime) > Date.now())
+    .filter(p => p && !p.suspicious && !pickHiddenReason(p) && Date.parse(p.commenceTime) > Date.now())
     .sort((a,b) => pickRankScore(b) - pickRankScore(a));
-  const seen = new Set();
-  return pool.filter(p => { const k = clvKey(p); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0,AI_FINALISTS);
+  return onePerSide(pool).slice(0,AI_FINALISTS);
 }
 function buildPrompts(candidates, hasSearch) {
   const searchInstr = hasSearch
@@ -2052,12 +2083,7 @@ async function scan() {
       }
     }
 
-    const rankScore = o => {
-      const edgeNorm = CLAMP(o.edge / SANITY_EDGE, 0, 1);
-      const c = (o.confidence != null) ? o.confidence : 0.5;
-      return 0.60*edgeNorm + 0.40*c;
-    };
-    opps.sort((a, b) => rankScore(b) - rankScore(a));
+    opps.sort((a, b) => pickRankScore(b) - pickRankScore(a));
 
     const now     = Date.now();
     const cut72h  = now + H72;
@@ -2069,19 +2095,22 @@ async function scan() {
       // A negative line is a favourite, never a longshot, so it always passes.
       return cap == null || o.line <= cap;
     };
-    const nearOpps   = opps.filter(o => !o.suspicious && passesOddsCap(o) && new Date(o.commenceTime).getTime() <= cut72h);
-    const futureOpps = opps.filter(o => {
-      if (o.suspicious || !passesOddsCap(o)) return false;
+    // Display candidates: model rules applied, then one row per game side.
+    const showable = onePerSide(opps.filter(o => !o.suspicious && !pickHiddenReason(o)));
+    const ruleHiddenCount = opps.filter(o => !o.suspicious).length - showable.length;
+    const nearOpps   = showable.filter(o => passesOddsCap(o) && new Date(o.commenceTime).getTime() <= cut72h);
+    const futureOpps = showable.filter(o => {
+      if (!passesOddsCap(o)) return false;
       const t = new Date(o.commenceTime).getTime();
       return t > cut72h && t <= cutFar;
     });
     const flaggedAll = opps.filter(o => o.suspicious);
     const flagged = flaggedAll.slice(0, 3);
-    const farOpps = opps.filter(o => !o.suspicious && passesOddsCap(o) && new Date(o.commenceTime).getTime() > cutFar);
+    const farOpps = showable.filter(o => passesOddsCap(o) && new Date(o.commenceTime).getTime() > cutFar);
     // Plays that exist but are hidden purely by the odds cap -- tracked
     // separately so the "N found, M shown" messaging can be honest about
     // why, the same way it already is for topN truncation.
-    const oddsCappedCount = opps.filter(o => !o.suspicious && !passesOddsCap(o)).length;
+    const oddsCappedCount = showable.filter(o => !passesOddsCap(o)).length;
 
     // Track the full non-suspicious research cohort independently of display limits.
     const tracked = new Map(opps.filter(o => !o.suspicious).map(o => {
@@ -2108,7 +2137,8 @@ async function scan() {
       + Math.max(0, flaggedAll.length - flagged.length)
       + nearTruncated
       + futureTruncated
-      + oddsCappedCount;
+      + oddsCappedCount
+      + ruleHiddenCount;
 
     const picks = {
       date:        today(),
@@ -2351,6 +2381,7 @@ if (pend) st.pending = pend;
 
   migrateSchemaV2();
   migrateSchemaV3();
+  setTimeout(loadFairClose, 0);
   migrateSchemaV4();
   // PHASE 0 (2.2): finalizeStalePending() used to run HERE, before scan().
   // captureClosing() only processes picks where closingLine == null, so the
@@ -2411,7 +2442,7 @@ function explain(q, html) { return `<details class="ex"><summary>${esc(q)}</summ
 const action = (fn,...args) => attribute(`EL.${fn}(${args.map(x=>JSON.stringify(x)).join(',')})`);
 const originalRender = render;
 Object.assign(window.EL, {
-  navigate(page) { ui.page=page;ui.detailId=null;ui.limit=30;ui.search='';st.settleId=null;st.showSettings=false;render();document.getElementById('workspace-title')?.focus(); },
+  navigate(page) { if(page==='performance') loadFairClose(); ui.page=page;ui.detailId=null;ui.limit=30;ui.search='';st.settleId=null;st.showSettings=false;render();document.getElementById('workspace-title')?.focus(); },
   detail(id) {ui.detailFrom=ui.page;ui.detailId=id;ui.page='detail';render();document.getElementById('workspace-title')?.focus();},
   filter(key,value) {ui[key]=value;ui.limit=30;render();},
   loadMore() {ui.limit+=50;render();},
@@ -2420,10 +2451,19 @@ Object.assign(window.EL, {
   changeKey() {this.navigate('settings');},
   rescan() {if(!AK){this.navigate('settings');return;}this.retry();}
 });
-function currentOpportunities() {
+function currentOpportunities(opts = {}) {
   const source = st.picks?.opportunities || [...(st.picks?.near||[]),...(st.picks?.future||[]),...(st.picks?.far||[]),...(st.picks?.researchFinalists||[])];
   const seen = new Set();
-  return source.filter(p=>p && Date.parse(p.commenceTime)>Date.now() && !seen.has(p.id) && seen.add(p.id)).sort((a,b)=>pickRankScore(b)-pickRankScore(a));
+  const all = source.filter(p=>p && Date.parse(p.commenceTime)>Date.now() && !seen.has(p.id) && seen.add(p.id)).sort((a,b)=>pickRankScore(b)-pickRankScore(a));
+  // Every scanned quote stays tracked; the lists you look at follow the model rules.
+  return opts.includeHidden ? all : onePerSide(all.filter(p => !pickHiddenReason(p)));
+}
+function hiddenOpportunityCounts() {
+  const all = currentOpportunities({ includeHidden: true });
+  const shown = currentOpportunities().length;
+  const paused = all.filter(p => pickHiddenReason(p) === 'paused book').length;
+  const disagree = all.filter(p => pickHiddenReason(p) === 'Pinnacle and consensus disagree').length;
+  return { total: all.length - shown, paused, disagree, duplicates: all.length - shown - paused - disagree };
 }
 function recordSummary() {
   const placed=st.history.filter(p=>['W','L','P'].includes(p.result));
@@ -2459,7 +2499,9 @@ function aiTodaySummary() {
  } else if(!vals.length){
   body=`<p class="quiet" style="margin:0">No AI read yet on today's finalists. <button class="btn" style="font-size:11px" onclick="${action('runAiPanel')}">Run AI panel</button></p>`;
  } else if(consensusPick){
-  body=`<p style="margin:0"><strong>${agrees?'Agrees with the math pick:':'Picked something else:'}</strong> ${esc(consensusPick.bet)} <span class="quiet">&middot; ${esc(consensusPick.game)}</span> <span class="quiet">(${consensus.votes}/${consensus.total} model votes)</span></p>`;
+  body=agrees
+   ? `<p style="margin:0"><strong>Agrees with the math pick:</strong> ${esc(consensusPick.bet)} <span class="quiet">&middot; ${esc(consensusPick.game)}</span> <span class="quiet">(${consensus.votes}/${consensus.total} model votes)</span></p>`
+   : `<p style="margin:0"><strong>The math pick stands:</strong> ${esc(layer1Top.bet)} <span class="quiet">&middot; ${esc(layer1Top.game)}</span></p><p class="quiet" style="margin:6px 0 0">The panel preferred ${esc(consensusPick.bet)} (${consensus.votes}/${consensus.total} votes). Advisory only: in 35 past overrides, the panel's choice saw less price movement in our favour than the pick it replaced (+1.6pp vs +2.8pp).</p>`;
  } else {
   body=`<p class="quiet" style="margin:0">Every model that responded declined to back any of today's finalists.</p>`;
  }
@@ -2491,7 +2533,7 @@ function selectControl(label,key,items) {
 }
 function scannerView() {
  const rows=filteredOpportunities(),all=currentOpportunities();
- return `<section class="panel"><div class="panel-head"><div><h2>Market opportunities</h2><p>${rows.length} of ${all.length} upcoming quotes · probability gap, not guaranteed value</p></div></div><div class="tools">${searchControl('Team, selection or book')}${selectControl('Sport','sport',[['all','All sports'],...[...new Set(all.map(p=>p.sport))].sort().map(x=>[x,x])])}${selectControl('Market','market',[['all','All markets'],['ML','Moneyline'],['Spread','Spread'],['Total','Total']])}${selectControl('Sort','sort',[['rank','Model rank'],['gap','Largest gap'],['time','Starting soon']])}</div>${rows.length?opportunityRows(rows.slice(0,ui.limit)):emptyState(all.length?'No matching opportunities':'No current scan opportunities',all.length?'Change the filters or search to see other opportunities.':'Scan current markets to populate this view. Older tracked records remain in Tracker.')}${rows.length>ui.limit?`<button class="button" onclick="EL.loadMore()">Show more opportunities</button>`:''}</section>${st.picks?.flagged?.length?`<section class="panel"><h2>Flagged for review</h2><p class="quiet">These gaps exceed the sanity threshold and are not recommendations.</p>${st.picks.flagged.map(flagCard).join('')}</section>`:''}<p class="section-note">The Scanner shows current scan quotes, including opportunities beyond your Today display limit. Filtering this screen does not alter research tracking. Older caches may show a smaller cohort until the next scan.</p>`;
+ return `<section class="panel"><div class="panel-head"><div><h2>Market opportunities</h2><p>${rows.length} of ${all.length} upcoming quotes · probability gap, not guaranteed value</p></div></div><div class="tools">${searchControl('Team, selection or book')}${selectControl('Sport','sport',[['all','All sports'],...[...new Set(all.map(p=>p.sport))].sort().map(x=>[x,x])])}${selectControl('Market','market',[['all','All markets'],['ML','Moneyline'],['Spread','Spread'],['Total','Total']])}${selectControl('Sort','sort',[['rank','Model rank'],['gap','Largest gap'],['time','Starting soon']])}</div>${rows.length?opportunityRows(rows.slice(0,ui.limit)):emptyState(all.length?'No matching opportunities':'No current scan opportunities',all.length?'Change the filters or search to see other opportunities.':'Scan current markets to populate this view. Older tracked records remain in Tracker.')}${rows.length>ui.limit?`<button class="button" onclick="EL.loadMore()">Show more opportunities</button>`:''}</section>${st.picks?.flagged?.length?`<section class="panel"><h2>Flagged for review</h2><p class="quiet">These gaps exceed the sanity threshold and are not recommendations.</p>${st.picks.flagged.map(flagCard).join('')}</section>`:''}${(()=>{const h=hiddenOpportunityCounts();return h.total?`<p class="section-note">${h.total} more quote${h.total===1?'':'s'} hidden by the model rules: ${h.duplicates} the same bet at a worse price elsewhere · ${h.disagree} where Pinnacle and the other books disagree by 3pp or more · ${h.paused} at Caesars (paused). All of them are still tracked.</p>`:'';})()}<p class="section-note">The Scanner shows current scan quotes, including opportunities beyond your Today display limit. Filtering this screen does not alter research tracking. Older caches may show a smaller cohort until the next scan.</p>`;
 }
 function trackedRecords() {
  const query=ui.search.trim().toLowerCase();
@@ -2532,16 +2574,72 @@ function trackerView() {
 }
 function detailView() {
  const canonical=[...st.history,...st.pending].find(p=>p.id===ui.detailId);
- const quote=currentOpportunities().find(p=>p.id===ui.detailId);
+ const quote=currentOpportunities({includeHidden:true}).find(p=>p.id===ui.detailId);
  const p=quote||canonical;
  if(!p)return emptyState('Record unavailable','The selected record is not in this browser. Return to the Tracker.','Open tracker','openTracker');
  const confidence=p.confMeta?confidenceLabel(quantConfidence(p)):null;
  const currentTitle=quote?'Current scan quote':'Saved entry';
- return `<button class="textbutton back" onclick="${action('navigate',ui.detailFrom||'scanner')}">← Back</button><section class="panel"><div class="eyebrow">${esc(p.sport)} / ${esc(p.mkt)}</div><h2 style="font-size:27px">${esc(p.bet)}</h2><p class="sub">${esc(p.game)} · ${esc(fDT(p.commenceTime))}</p><div class="detail-grid"><div><small>${currentTitle} · ${esc(p.book)}</small><strong>${fO(p.line)}</strong></div><div><small>Better than fair by</small><strong class="positive">${Number.isFinite(p.edge)?fGap(p.edge):'—'}</strong></div><div><small>Modelled return</small><strong>${Number.isFinite(p.edgeEV)?fE(p.edgeEV):'—'}</strong></div></div>${explain('Why are these two numbers so different?','<p>They are the same disagreement stated twice. The return figure is the first number multiplied by the odds, so a long price always makes it look bigger — a 2pp gap at +190 becomes "+6%" without anything improving.</p><p>Read the first one. It is in the same unit as the closing-price movement the app measures against, so the two can actually be compared. The return figure is kept only for working out stake size.</p>')}<p class="quiet">${quote?'These figures belong to the current scan quote. Your original saved entry is shown separately below.':'This is a saved entry, not a current offer.'+(p.entrySchema<4?' Legacy entry features are excluded from edge and confidence calibration.':'')}</p></section><div class="split"><section class="panel"><h2>Reference & confidence</h2><div class="aside-line"><span>Compared against</span><strong>${p.sharp?'Pinnacle (sharp book)':'Average of other books'}</strong></div><div class="aside-line"><span>Estimated chance of winning</span><strong>${Number.isFinite(p.fairProb)?(100*p.fairProb).toFixed(1)+'%':'—'}</strong></div><div class="aside-line"><span>How solid that estimate is</span><strong>${confidence?esc(confidence.tier):'Not recorded'}</strong></div><p class="quiet">${confidence?.strongest?esc(confidence.strongest)+'. ':''}${confidence?.weakest?esc(confidence.weakest)+'.':''}</p><p class="quiet">The gap measures disagreement against the reference. It does not establish a true winning probability.</p>${explain('What makes an estimate solid or shaky?','<p>Four things: whether a sharp bookmaker was available as the yardstick, how closely the other books agree with each other, how many were quoting at all, and whether the sharp price and the consensus tell the same story.</p><p>"Compared against: average of other books" means no sharp yardstick was available. Those estimates are the shakiest — and the gap they produce looks exactly like any other gap, which is why this panel exists.</p>')}${quote&&Number.isFinite(p.fairProb)&&st.bankroll?`<p class="quiet">Quarter-Kelly calculation: $${kellyStake(p.fairProb,p.line,st.bankroll).toFixed(2)} against your $${st.bankroll} bankroll. This assumes the reference probability is accurate.</p>`:''}</section><section class="panel"><h2>Original tracked record</h2>${canonical?`<div class="aside-line"><span>Entry odds</span><strong>${fO(canonical.line)}</strong></div><div class="aside-line"><span>Result</span><strong>${({W:'Win',L:'Loss',P:'Push',N:'No bet'}[canonical.result])||'Pending'}</strong></div><p class="quiet">${esc(closeLabel(canonical))}</p>${canonical.closingLine!=null?`<p class="quiet">Recorded close: ${fO(canonical.closingLine)}</p>`:''}${canonical.closeEvidence?`<p class="quiet">Source quote: ${esc(fDT(canonical.closeEvidence.quoteAt))}<br>Observed: ${esc(fDT(canonical.closeEvidence.observedAt))}</p>`:''}<button class="button" onclick="${action('openSettle',canonical.id)}">${canonical.result?'Review result':'Settle / mark No bet'}</button>`:'<p class="quiet">No canonical record is available for settlement.</p>'}</section></div>`;
+ return `<button class="textbutton back" onclick="${action('navigate',ui.detailFrom||'scanner')}">← Back</button><section class="panel"><div class="eyebrow">${esc(p.sport)} / ${esc(p.mkt)}</div><h2 style="font-size:27px">${esc(p.bet)}</h2><p class="sub">${esc(p.game)} · ${esc(fDT(p.commenceTime))}</p><div class="detail-grid"><div><small>${currentTitle} · ${esc(p.book)}</small><strong>${fO(p.line)}</strong></div><div><small>Better than fair by</small><strong class="positive">${Number.isFinite(p.edge)?fGap(p.edge):'—'}</strong></div><div><small>Modelled return</small><strong>${Number.isFinite(p.edgeEV)?fE(p.edgeEV):'—'}</strong></div></div>${explain('Why are these two numbers so different?','<p>They are the same disagreement stated twice. The return figure is the first number multiplied by the odds, so a long price always makes it look bigger — a 2pp gap at +190 becomes "+6%" without anything improving.</p><p>Read the first one. It is in the same unit as the closing-price movement the app measures against, so the two can actually be compared. The return figure is kept only for working out stake size.</p>')}<p class="quiet">${quote?'These figures belong to the current scan quote. Your original saved entry is shown separately below.':'This is a saved entry, not a current offer.'+(p.entrySchema<4?' Legacy entry features are excluded from edge and confidence calibration.':'')}</p></section><div class="split"><section class="panel"><h2>Reference & confidence</h2><div class="aside-line"><span>Compared against</span><strong>${p.sharp?'Pinnacle (sharp book)':'Average of other books'}</strong></div><div class="aside-line"><span>Estimated chance of winning</span><strong>${Number.isFinite(p.fairProb)?(100*p.fairProb).toFixed(1)+'%':'—'}</strong></div><div class="aside-line"><span>How solid that estimate is</span><strong>${confidence?esc(confidence.tier):'Not recorded'}</strong></div><p class="quiet">${confidence?.strongest?esc(confidence.strongest)+'. ':''}${confidence?.weakest?esc(confidence.weakest)+'.':''}</p><p class="quiet">The gap measures disagreement against the reference. It does not establish a true winning probability.</p>${explain('What makes an estimate solid or shaky?','<p>Four things: whether a sharp bookmaker was available as the yardstick, how closely the other books agree with each other, how many were quoting at all, and whether the sharp price and the consensus tell the same story.</p><p>"Compared against: average of other books" means no sharp yardstick was available. Those estimates are the shakiest — and the gap they produce looks exactly like any other gap, which is why this panel exists.</p>')}${quote&&Number.isFinite(p.fairProb)&&st.bankroll?`<p class="quiet">Quarter-Kelly calculation: $${kellyStake(p.fairProb,p.line,st.bankroll).toFixed(2)} against your $${st.bankroll} bankroll. This assumes the reference probability is accurate.</p>`:''}</section><section class="panel"><h2>Original tracked record</h2>${canonical?`<div class="aside-line"><span>Entry odds</span><strong>${fO(canonical.line)}</strong></div><div class="aside-line"><span>Result</span><strong>${({W:'Win',L:'Loss',P:'Push',N:'No bet'}[canonical.result])||'Pending'}</strong></div><p class="quiet">${esc(closeLabel(canonical))}</p>${canonical.closingLine!=null?`<p class="quiet">Recorded close: ${fO(canonical.closingLine)}</p>`:''}${(()=>{const f=st.fairClose?.entries?.[canonical.id];return f&&f.status==='ok'?`<p class="quiet">Pinnacle fair close: ${(100*f.pinFair).toFixed(1)}% (${fO(f.pinPrice)}) · your price beat it by <strong>${fCLV(f.pinFair-iP(canonical.line))}</strong></p>`:'';})()}${canonical.closeEvidence?`<p class="quiet">Source quote: ${esc(fDT(canonical.closeEvidence.quoteAt))}<br>Observed: ${esc(fDT(canonical.closeEvidence.observedAt))}</p>`:''}<button class="button" onclick="${action('openSettle',canonical.id)}">${canonical.result?'Review result':'Settle / mark No bet'}</button>`:'<p class="quiet">No canonical record is available for settlement.</p>'}</section></div>`;
+}
+// FAIR-CLOSE CLV (Nov 7 2026). Collected by scripts/fair-close.mjs from the
+// 5-minute GitHub Actions trigger: Pinnacle's no-vig probability for each
+// tracked pick, observed shortly before kickoff. Same-book CLV shows the book
+// moved toward you; this shows whether the price beat the market's own final,
+// margin-free estimate — the test that actually establishes an edge.
+const FAIRCLOSE_URL = 'https://raw.githubusercontent.com/bradpeds/embet-brad-/data/fairclose.json';
+const FAIR_TARGET = 300;
+async function loadFairClose() {
+  try {
+    const r = await fetch(FAIRCLOSE_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (r.ok) { st.fairClose = await r.json(); render(); }
+  } catch (e) { /* offline or not created yet: the panel says so */ }
+}
+function fairCloseRows() {
+  const E = st.fairClose?.entries || {};
+  const byKey = new Map();
+  for (const p of [...st.pending, ...st.history]) {
+    const f = E[p.id];
+    if (!f || f.status !== 'ok' || !Number.isFinite(f.pinFair) || typeof p.line !== 'number') continue;
+    if (p.entrySchema != null && p.entrySchema < 4) continue;
+    if (Date.parse(f.observedAt) >= Date.parse(p.commenceTime)) continue;
+    // Same rule as same-book CLV: one wager per game side, best price kept.
+    const k = clvKey(p), prev = byKey.get(k);
+    if (!prev || iP(p.line) < iP(prev.p.line)) byKey.set(k, { p, f });
+  }
+  return [...byKey.values()].map(({ p, f }) => ({ p, f, v: f.pinFair - iP(p.line),
+    own: Number.isFinite(f.bookFair) ? f.bookFair - iP(p.line) : null }));
+}
+function rowsClusterSE(rows) {
+  const n = rows.length;
+  if (n < 2) return null;
+  const mean = rows.reduce((a, r) => a + r.v, 0) / n;
+  const sums = new Map();
+  for (const r of rows) { const k = r.p.gameId || r.p.game; sums.set(k, (sums.get(k) || 0) + r.v - mean); }
+  const g = sums.size;
+  if (g < 30) return null;
+  return Math.sqrt(g / (g - 1) * [...sums.values()].reduce((a, x) => a + x * x, 0) / n ** 2);
+}
+function fairClosePanel() {
+  const rows = fairCloseRows(), n = rows.length;
+  const mean = n ? rows.reduce((a, r) => a + r.v, 0) / n : null;
+  const se = rowsClusterSE(rows);
+  const beat = n ? rows.filter(r => r.v > 0).length / n : null;
+  const ownRows = rows.filter(r => r.own != null);
+  const ownMean = ownRows.length ? ownRows.reduce((a, r) => a + r.own, 0) / ownRows.length : null;
+  const E = st.fairClose?.entries || {};
+  const failed = Object.values(E).filter(f => f.status !== 'ok').length;
+  const skipped = Object.keys(st.fairClose?.budgetSkipped || {}).length;
+  let verdict;
+  if (!st.fairClose) verdict = 'Waiting for the first collection run. Closes are collected automatically in the half hour before each game starts.';
+  else if (n < FAIR_TARGET) verdict = `Collecting: ${n} of ${FAIR_TARGET} picks measured. No verdict until ${FAIR_TARGET} — the running average below is a direction, not a result.`;
+  else if (mean >= 0.01) verdict = `<strong>Pass.</strong> Above +1pp at ${n} picks: the edge is real. Resume tuning and consider real stakes.`;
+  else if (mean > 0) verdict = `<strong>Marginal.</strong> Between 0 and +1pp at ${n} picks. Narrow to the strongest segment before staking more.`;
+  else verdict = `<strong>Fail.</strong> Zero or below at ${n} picks: the scanner is finding price differences you cannot profit from.`;
+  return `<section class="panel" style="border-left:3px solid var(--accent)"><div class="panel-head"><div><h2>The real test: did you beat the fair closing price?</h2><p>Your price vs Pinnacle's margin-free price just before kickoff</p></div></div><div class="detail-grid"><div><small>Average edge at close</small><strong class="${mean==null?'':mean>=0?'positive':''}">${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Picks measured</small><strong>${n} / ${FAIR_TARGET}</strong></div><div><small>Beat the fair close</small><strong>${beat!=null?Math.round(beat*100)+'%':'—'}</strong></div></div><p>${verdict}</p><p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by game.`:'No margin of error until 30 different games are measured.'}${ownMean!=null?` Against the same book's own margin-free close: ${fCLV(ownMean)} over ${ownRows.length}.`:''}${failed||skipped?` Not measured: ${failed} where Pinnacle had no matching line at the close${skipped?`, ${skipped} skipped to protect the daily odds budget`:''}.`:''}</p>${explain('Why is this different from "average move in your favour"?','<p>The older number compares your price with the same sportsbook\'s price at kickoff. That price still includes the book\'s cut — about 2 to 2.5 points of win chance on each side — so a pick can beat it and still be a losing price.</p><p>This number strips the cut out of Pinnacle\'s closing price, the sharpest market available, and asks whether your price was better than that. It is the standard professional test of whether an edge is real.</p>')}${explain('What was decided in advance?','<p>Set on Nov 7, 2026, before any of this data existed, so a hot or cold week cannot move the goalposts. At 300 measured picks:</p><p><strong>Above +1pp</strong> — the edge is real. Resume tuning and consider real stakes.<br><strong>0 to +1pp</strong> — marginal. Keep only the strongest segment.<br><strong>Zero or below</strong> — the scanner finds differences you cannot profit from.</p><p>Until then, the model rules stay frozen.</p>')}</section>`;
 }
 function performanceView() {
  const d=recordSummary(),rows=d.closes,x=clvExcludedCounts();const mean=rows.length?rows.reduce((a,p)=>a+cCLV(p.line,p.closingLine),0)/rows.length:null;const se=eventClusterSE(rows,mean);
- return summaryCards()+`<section class="panel"><div class="panel-head"><div><h2>Is this actually working?</h2><p>How far prices moved after you took them — the same book, before and after</p></div></div><div class="detail-grid"><div><small>Average move in your favour</small><strong>${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Bets measured</small><strong>${rows.length}</strong></div><div><small>Not counted</small><strong>${x.total}</strong></div></div>${explain('What counts as evidence here, and what does not?','<p>A bet counts only if the app actually saw the price shortly before kickoff, with a timestamp proving when. Anything else is excluded — including prices recorded before the app tracked where a price came from, and second copies of the same bet taken at another sportsbook.</p><p>None of that removes a bet from your history or changes a win or a loss. It only decides what is allowed to be used as proof.</p>')}<p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by event.`:`No margin of error yet — that needs at least 30 different games measured, and there ${rows.length === 1 ? 'is 1' : 'are ' + rows.length} so far. Treat the average above as a direction, not a result.`}</p><p class="quiet">Not counted: ${x.legacy} recorded before the app tracked where a closing price came from · ${x.fallback} where no price was seen in time · ${x.duplicates} the same bet at a second book. Your results are unaffected.</p><p class="quiet">${sampleNote(rows.length)}</p></section><div class="split"><div>${calibrationTable('Does a bigger gap pay off?',calibrationRows(),'If the rows lower down move more, the gap number is measuring something real. Flat or backwards means it is not — yet.')}${calibrationTable('Is the confidence score worth anything?',confidenceCalibrationRows(),'High confidence should move more than low. If it does not, the score is not earning the weight it carries in the ranking.')}</div><div>${calibrationTable('Does the price level matter?',oddsCalibrationRows(),'The maths behind the fair price is most reliable near even money. This checks whether that holds in your own results.')}${calibrationTable('Which sports are working?',sportCalibrationRows(),'The sharp reference book is deepest in the major leagues. If the thinner sports drag the average down, that is a reason to weight or drop them.')}${calibrationTable('Does a stale close still count for anything?',closeAgeRows(),'How long before kickoff the book last moved the price that became your close. If the older rows hold up, a tight capture window was throwing away good evidence. If they fall away, this table says where the real cutoff belongs.')}</div></div><p class="section-note">Every table above needs a few hundred measured bets before it reads clearly. Older records stay saved but some cannot be used in these tables, because the app could not prove their entry figures were never edited. The profit figure assumes a flat $10 a bet and is not your sportsbook balance.</p>`;
+ return summaryCards()+fairClosePanel()+`<section class="panel"><div class="panel-head"><div><h2>Is this actually working?</h2><p>How far prices moved after you took them — the same book, before and after</p></div></div><div class="detail-grid"><div><small>Average move in your favour</small><strong>${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Bets measured</small><strong>${rows.length}</strong></div><div><small>Not counted</small><strong>${x.total}</strong></div></div>${explain('What counts as evidence here, and what does not?','<p>A bet counts only if the app actually saw the price shortly before kickoff, with a timestamp proving when. Anything else is excluded — including prices recorded before the app tracked where a price came from, and second copies of the same bet taken at another sportsbook.</p><p>None of that removes a bet from your history or changes a win or a loss. It only decides what is allowed to be used as proof.</p>')}<p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by event.`:`No margin of error yet — that needs at least 30 different games measured, and there ${rows.length === 1 ? 'is 1' : 'are ' + rows.length} so far. Treat the average above as a direction, not a result.`}</p><p class="quiet">Not counted: ${x.legacy} recorded before the app tracked where a closing price came from · ${x.fallback} where no price was seen in time · ${x.duplicates} the same bet at a second book. Your results are unaffected.</p><p class="quiet">${sampleNote(rows.length)}</p></section><div class="split"><div>${calibrationTable('Does a bigger gap pay off?',calibrationRows(),'If the rows lower down move more, the gap number is measuring something real. Flat or backwards means it is not — yet.')}${calibrationTable('Is the confidence score worth anything?',confidenceCalibrationRows(),'High confidence should move more than low. It did not, so since Nov 7 the score no longer affects ranking; this table decides whether it earns a way back in.')}</div><div>${calibrationTable('Does the price level matter?',oddsCalibrationRows(),'The maths behind the fair price is most reliable near even money. This checks whether that holds in your own results.')}${calibrationTable('Which sports are working?',sportCalibrationRows(),'The sharp reference book is deepest in the major leagues. If the thinner sports drag the average down, that is a reason to weight or drop them.')}${calibrationTable('Does a stale close still count for anything?',closeAgeRows(),'How long before kickoff the book last moved the price that became your close. If the older rows hold up, a tight capture window was throwing away good evidence. If they fall away, this table says where the real cutoff belongs.')}</div></div><p class="section-note">Every table above needs a few hundred measured bets before it reads clearly. Older records stay saved but some cannot be used in these tables, because the app could not prove their entry figures were never edited. The profit figure assumes a flat $10 a bet and is not your sportsbook balance.</p>`;
 }
 function aiView() {
  const batches=layerBatches(),eligible=studyBatches();
