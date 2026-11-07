@@ -2652,11 +2652,15 @@ function shinFairN(prices) {
 // Primary source: the Worker's own Pinnacle snapshot, taken with the captured
 // close (closeEvidence.pin, recorded since Oct 16 2026). Fallback: the
 // GitHub-collected fairclose.json entry.
+// Also accepts the Worker's 'line-moved' evidence (Nov 7 2026): the book left
+// the bet's number before kickoff, so no same-book close exists, but Pinnacle
+// still priced the bet's own number. The fair-close test only needs Pinnacle.
 function fairCloseFor(p) {
   const pin = p.closeEvidence?.pin || p.preClose?.pin;
-  if (p.closeSource === 'captured' && pin && Number.isFinite(pin.price) && Array.isArray(pin.others) && pin.others.length) {
+  const lineMoved = p.closeEvidence?.method === 'line-moved' && Date.now() >= Date.parse(p.commenceTime);
+  if ((p.closeSource === 'captured' || lineMoved) && pin && Number.isFinite(pin.price) && Array.isArray(pin.others) && pin.others.length) {
     const fair = shinFairN([pin.price, ...pin.others])[0];
-    if (fair > 0 && fair < 1) return { status: 'ok', pinFair: fair, pinPrice: pin.price, observedAt: pin.quoteAt, source: 'worker' };
+    if (fair > 0 && fair < 1) return { status: 'ok', pinFair: fair, pinPrice: pin.price, observedAt: pin.quoteAt, source: lineMoved && p.closeSource !== 'captured' ? 'line-moved' : 'worker' };
   }
   const f = st.fairClose?.entries?.[p.id];
   return f ? { ...f, source: 'collector' } : null;
@@ -2685,6 +2689,25 @@ function rowsClusterSE(rows) {
   if (g < 30) return null;
   return Math.sqrt(g / (g - 1) * [...sums.values()].reduce((a, x) => a + x * x, 0) / n ** 2);
 }
+// Which way did the book go when it left the bet's number? Spread: a lower
+// number for the same side means the market moved toward it. Total: Over
+// gains when the number rises, Under when it falls.
+function movedLineSummary() {
+  let toward = 0, away = 0;
+  for (const p of [...st.pending, ...st.history]) {
+    const e = p.closeEvidence;
+    if (e?.method !== 'line-moved' || !e.bookMoved || p.closeSource === 'captured') continue;
+    const m = String(p.bet).match(/\(([+-]?\d+(?:\.\d+)?)\)\s*$/); if (!m) continue;
+    const orig = Number(m[1]), now = Number(e.bookMoved.point);
+    if (!Number.isFinite(now) || now === orig) continue;
+    let good;
+    if (p.mkt === 'Spread') good = now < orig;
+    else if (p.mkt === 'Total') good = /^over/i.test(p.bet) ? now > orig : now < orig;
+    else continue;
+    good ? toward++ : away++;
+  }
+  return { toward, away, n: toward + away };
+}
 function fairClosePanel() {
   const rows = fairCloseRows(), n = rows.length;
   const mean = n ? rows.reduce((a, r) => a + r.v, 0) / n : null;
@@ -2701,7 +2724,7 @@ function fairClosePanel() {
   else if (mean >= 0.01) verdict = `<strong>Pass.</strong> Above +1pp at ${n} picks: the edge is real. Resume tuning and consider real stakes.`;
   else if (mean > 0) verdict = `<strong>Marginal.</strong> Between 0 and +1pp at ${n} picks. Narrow to the strongest segment before staking more.`;
   else verdict = `<strong>Fail.</strong> Zero or below at ${n} picks: the scanner is finding price differences you cannot profit from.`;
-  return `<section class="panel" style="border-left:3px solid var(--accent)"><div class="panel-head"><div><h2>The real test: did you beat the fair closing price?</h2><p>Your price vs Pinnacle's margin-free price just before kickoff</p></div></div><div class="detail-grid"><div><small>Average edge at close</small><strong class="${mean==null?'':mean>=0?'positive':''}">${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Picks measured</small><strong>${n} / ${FAIR_TARGET}</strong></div><div><small>Beat the fair close</small><strong>${beat!=null?Math.round(beat*100)+'%':'—'}</strong></div></div><p>${verdict}</p><p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by game.`:'No margin of error until 30 different games are measured.'}${ownMean!=null?` Against the same book's own margin-free close: ${fCLV(ownMean)} over ${ownRows.length}.`:''}${failed||skipped?` Not measured: ${failed} where Pinnacle had no matching line at the close${skipped?`, ${skipped} skipped to protect the daily odds budget`:''}.`:''}</p>${explain('Why is this different from "average move in your favour"?','<p>The older number compares your price with the same sportsbook\'s price at kickoff. That price still includes the book\'s cut — about 2 to 2.5 points of win chance on each side — so a pick can beat it and still be a losing price.</p><p>This number strips the cut out of Pinnacle\'s closing price, the sharpest market available, and asks whether your price was better than that. It is the standard professional test of whether an edge is real.</p>')}${explain('What was decided in advance?','<p>Set on Nov 7, 2026, before any of this data existed, so a hot or cold week cannot move the goalposts. At 300 measured picks:</p><p><strong>Above +1pp</strong> — the edge is real. Resume tuning and consider real stakes.<br><strong>0 to +1pp</strong> — marginal. Keep only the strongest segment.<br><strong>Zero or below</strong> — the scanner finds differences you cannot profit from.</p><p>Until then, the model rules stay frozen.</p>')}</section>`;
+  return `<section class="panel" style="border-left:3px solid var(--accent)"><div class="panel-head"><div><h2>The real test: did you beat the fair closing price?</h2><p>Your price vs Pinnacle's margin-free price just before kickoff</p></div></div><div class="detail-grid"><div><small>Average edge at close</small><strong class="${mean==null?'':mean>=0?'positive':''}">${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Picks measured</small><strong>${n} / ${FAIR_TARGET}</strong></div><div><small>Beat the fair close</small><strong>${beat!=null?Math.round(beat*100)+'%':'—'}</strong></div></div><p>${verdict}</p><p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by game.`:'No margin of error until 30 different games are measured.'}${ownMean!=null?` Against the same book's own margin-free close: ${fCLV(ownMean)} over ${ownRows.length}.`:''}${(()=>{const mv=movedLineSummary();return mv.n?` When a book moved off your number before kickoff (${mv.n} picks), it moved your way ${Math.round(mv.toward/mv.n*100)}% of the time.`:'';})()}${failed||skipped?` Not measured: ${failed} where Pinnacle had no matching line at the close${skipped?`, ${skipped} skipped to protect the daily odds budget`:''}.`:''}</p>${explain('Why is this different from "average move in your favour"?','<p>The older number compares your price with the same sportsbook\'s price at kickoff. That price still includes the book\'s cut — about 2 to 2.5 points of win chance on each side — so a pick can beat it and still be a losing price.</p><p>This number strips the cut out of Pinnacle\'s closing price, the sharpest market available, and asks whether your price was better than that. It is the standard professional test of whether an edge is real.</p>')}${explain('What was decided in advance?','<p>Set on Nov 7, 2026, before any of this data existed, so a hot or cold week cannot move the goalposts. At 300 measured picks:</p><p><strong>Above +1pp</strong> — the edge is real. Resume tuning and consider real stakes.<br><strong>0 to +1pp</strong> — marginal. Keep only the strongest segment.<br><strong>Zero or below</strong> — the scanner finds differences you cannot profit from.</p><p>Until then, the model rules stay frozen.</p>')}</section>`;
 }
 // FORWARD TESTS — written down Nov 7 2026, before any qualifying data existed.
 // Only picks first seen after FORWARD_START count. Each is judged at 100 picks
