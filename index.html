@@ -404,6 +404,37 @@ function onePerSide(rows) {
   const seen = new Set();
   return rows.filter(p => { const k = clvKey(p); if (seen.has(k)) return false; seen.add(k); return true; });
 }
+const PIN_HIST_KEY = 'embet_pin_hist';
+const PIN_MIN_GAP_MS = 5 * 60 * 1000, PIN_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const STEAM_MIN_MOVE = 0.005, STEAM_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+// Most recent observation at least 5 minutes old, so two scans a minute apart
+// do not hide a move that happened between them.
+function pinPrevious(hist, nowMs) {
+  const h = (hist || []).filter(x => nowMs - Date.parse(x.at) >= PIN_MIN_GAP_MS && nowMs - Date.parse(x.at) <= PIN_MAX_AGE_MS);
+  return h.length ? h[h.length - 1] : null;
+}
+function pinRecord(hist, p, nowMs) {
+  return [...(hist || []), { p: Math.round(p * 1e5) / 1e5, at: new Date(nowMs).toISOString() }]
+    .filter(x => nowMs - Date.parse(x.at) <= PIN_MAX_AGE_MS).slice(-6);
+}
+function prunePinHist(all, nowMs) {
+  const out = {};
+  for (const k in all) { const h = (all[k] || []).filter(x => nowMs - Date.parse(x.at) <= PIN_MAX_AGE_MS); if (h.length) out[k] = h; }
+  return out;
+}
+// How far Pinnacle's fair price moved toward this pick since the previous look.
+// null when no earlier look exists (server-scan picks, or a first scan).
+function pinMove(p) {
+  const m = p?.confMeta;
+  if (!m || m.pinPrev == null || !Number.isFinite(p.fairProb)) return null;
+  const detected = Date.parse(p.detectedAt || '') || null;
+  const age = detected ? detected - Date.parse(m.pinPrevAt) : null;
+  return { move: p.fairProb - m.pinPrev, ageMs: age };
+}
+function isSteam(p) {
+  const pm = pinMove(p);
+  return !!pm && pm.move >= STEAM_MIN_MOVE && (pm.ageMs == null || pm.ageMs <= STEAM_MAX_AGE_MS);
+}
 function pickRankScore(o) {
   // The disagreement term is a tie-breaker (at most 0.003pp), not a weight.
   const d = refDisagreement(o);
@@ -1882,6 +1913,12 @@ async function scan() {
     const scannedGames = [];
     const opps = [];
     const failedSports = [];
+    // PINNACLE-MOVE SHADOW TEST (Nov 7 2026): a short history of Pinnacle's
+    // fair price per selection, so each new pick can record whether Pinnacle
+    // has just moved toward it. Stored on the pick (confMeta.pinPrev); it does
+    // not affect ranking or display.
+    const pinHist = LS.get(PIN_HIST_KEY) || {};
+    const scanAtMs = Date.now();
 
     for (const sport of sorted) {
       const url = new URL(`${OB}/sports/${sport}/odds/`);
@@ -1950,6 +1987,10 @@ async function scan() {
               meta[key] = { nBooks: soft[key].ips.length, disp: soft[key].disp,
                             pinProb: key === sideKeys[0] ? iP(a.price) : iP(b.price),
                             consProb: consProb[key] ?? null };
+              const hk = `${g.id}|${mkt}|${key}`;
+              const prev = pinPrevious(pinHist[hk], scanAtMs);
+              if (prev) { meta[key].pinPrev = prev.p; meta[key].pinPrevAt = prev.at; }
+              pinHist[hk] = pinRecord(pinHist[hk], fm[key], scanAtMs);
             }
           } else if (Date.parse(g.commence_time) - now.getTime() <= FALLBACK_MAX_LOOKAHEAD_MS) {
             // No sharp reference. Allowed only for games close enough that the
@@ -2083,6 +2124,7 @@ async function scan() {
       }
     }
 
+    LS.set(PIN_HIST_KEY, prunePinHist(pinHist, scanAtMs));
     opps.sort((a, b) => pickRankScore(b) - pickRankScore(a));
 
     const now     = Date.now();
@@ -2477,7 +2519,7 @@ function summaryCards() {
  return `<div class="stats"><div class="stat"><div class="label">Bets you settled</div><div class="value">${d.w}<span class="quiet"> won</span> · ${d.l}<span class="quiet"> lost</span></div><small>${money(d.pnl)} at a flat ${FLAT} a bet — not your real balance</small></div><div class="stat"><div class="label">Picks being watched</div><div class="value">${d.pending}</div><small>Found by the scanner. Watching one is not betting it.</small></div><div class="stat"><div class="label">Bets measured</div><div class="value">${d.closes.length}</div><small>Where the closing price was captured. This is the real scoreboard.</small></div></div>${explain('Why is "bets measured" the real scoreboard?','<p>Whether a single bet wins is mostly luck. What separates skill from luck is whether the price moved toward you between placing the bet and kickoff — if the market came around to your view, you were probably right for a reason.</p><p>That only works when the closing price was actually observed. Bets without one stay in your history but cannot be used as evidence.</p>')}`;
 }
 function opportunityRows(rows) {
- return rows.map((p,i)=>`<article class="opportunity"><div class="rank">${String(i+1).padStart(2,'0')}</div><div><h3>${esc(p.bet)}</h3><p>${esc(p.game)}</p><p>${esc(p.book)} · <span class="number">${fO(p.line)}</span> · ${esc(fDT(p.commenceTime))}</p><span class="tag">${esc(p.sport)}</span><span class="tag">${esc(p.mkt)}</span></div><div style="text-align:right"><div class="gap">${fGap(p.edge)}</div><div style="font-size:12px;color:var(--text2);margin-top:2px">better than fair</div><button class="textbutton" onclick="${action('detail',p.id)}">View details →</button></div></article>`).join('');
+ return rows.map((p,i)=>`<article class="opportunity"><div class="rank">${String(i+1).padStart(2,'0')}</div><div><h3>${esc(p.bet)}</h3><p>${esc(p.game)}</p><p>${esc(p.book)} · <span class="number">${fO(p.line)}</span> · ${esc(fDT(p.commenceTime))}</p><span class="tag">${esc(p.sport)}</span><span class="tag">${esc(p.mkt)}</span>${isSteam(p)?`<span class="tag" title="Pinnacle's price moved toward this side since the previous scan. Being tracked as a test; it does not change the ranking.">Pinnacle just moved +${(pinMove(p).move*100).toFixed(1)}pp</span>`:''}</div><div style="text-align:right"><div class="gap">${fGap(p.edge)}</div><div style="font-size:12px;color:var(--text2);margin-top:2px">better than fair</div><button class="textbutton" onclick="${action('detail',p.id)}">View details →</button></div></article>`).join('');
 }
 function emptyState(title,message,button='Scan markets',fn='rescan') {return `<div class="empty"><strong>${esc(title)}</strong>${esc(message)}<div style="margin-top:14px"><button class="button" onclick="${action(fn)}">${esc(button)}</button></div></div>`;}
 function aiTodaySummary() {
@@ -2514,8 +2556,8 @@ function todayView() {
 function renderRedesign() {
  const app=document.getElementById('app');if(!app)return;
  if(st.settleId){st.offlineHistory=true;originalRender();return;}
- const names={today:'Today',scanner:'Market Scanner',detail:'Opportunity Detail',tracker:'Tracker',performance:'Performance',ai:'AI Panel',settings:'Settings'};
- const nav=[['today','Today'],['scanner','Scanner'],['tracker','Tracker'],['performance','Performance'],['ai','AI Panel'],['settings','Settings']];
+ const names={today:'Today',scanner:'Market Scanner',boosts:'Boost Checker',detail:'Opportunity Detail',tracker:'Tracker',performance:'Performance',ai:'AI Panel',settings:'Settings'};
+ const nav=[['today','Today'],['scanner','Scanner'],['boosts','Boosts'],['tracker','Tracker'],['performance','Performance'],['ai','AI Panel'],['settings','Settings']];
  const pageContent=ui.page==='today'?todayView():typeof routeView==='function'?routeView(ui.page):todayView();
  app.innerHTML=`<a class="skip" href="#workspace-title">Skip to content</a><div class="shell"><aside class="rail"><div class="brand">emBET<small>Market intelligence</small></div><nav class="nav" aria-label="Main navigation">${nav.map(([k,v])=>`<button aria-current="${ui.page===k?'page':'false'}" onclick="${action('navigate',k)}">${v}</button>`).join('')}</nav><div class="rail-foot"><span class="rail-dot"></span>Personal workspace<br>Records saved in this browser</div></aside><main class="workspace"><header class="topbar"><div><div class="eyebrow">${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div><h1 id="workspace-title" tabindex="-1">${names[ui.page]||'Today'}</h1><p class="sub">${st.picks?.generatedAt?`Last scan ${esc(fDT(st.picks.generatedAt))}`:'Your records, research and market opportunities.'}</p></div><button class="button primary" onclick="${action('rescan')}" ${st.scanning?'disabled':''}>${st.scanning?'Scanning…':AK?'Scan markets':'Connect API'}</button></header>${st.err?`<div class="notice error" role="alert">${esc(st.err)}</div>`:''}${pageContent}</main></div>`;
 }
@@ -2661,9 +2703,35 @@ function fairClosePanel() {
   else verdict = `<strong>Fail.</strong> Zero or below at ${n} picks: the scanner is finding price differences you cannot profit from.`;
   return `<section class="panel" style="border-left:3px solid var(--accent)"><div class="panel-head"><div><h2>The real test: did you beat the fair closing price?</h2><p>Your price vs Pinnacle's margin-free price just before kickoff</p></div></div><div class="detail-grid"><div><small>Average edge at close</small><strong class="${mean==null?'':mean>=0?'positive':''}">${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Picks measured</small><strong>${n} / ${FAIR_TARGET}</strong></div><div><small>Beat the fair close</small><strong>${beat!=null?Math.round(beat*100)+'%':'—'}</strong></div></div><p>${verdict}</p><p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by game.`:'No margin of error until 30 different games are measured.'}${ownMean!=null?` Against the same book's own margin-free close: ${fCLV(ownMean)} over ${ownRows.length}.`:''}${failed||skipped?` Not measured: ${failed} where Pinnacle had no matching line at the close${skipped?`, ${skipped} skipped to protect the daily odds budget`:''}.`:''}</p>${explain('Why is this different from "average move in your favour"?','<p>The older number compares your price with the same sportsbook\'s price at kickoff. That price still includes the book\'s cut — about 2 to 2.5 points of win chance on each side — so a pick can beat it and still be a losing price.</p><p>This number strips the cut out of Pinnacle\'s closing price, the sharpest market available, and asks whether your price was better than that. It is the standard professional test of whether an edge is real.</p>')}${explain('What was decided in advance?','<p>Set on Nov 7, 2026, before any of this data existed, so a hot or cold week cannot move the goalposts. At 300 measured picks:</p><p><strong>Above +1pp</strong> — the edge is real. Resume tuning and consider real stakes.<br><strong>0 to +1pp</strong> — marginal. Keep only the strongest segment.<br><strong>Zero or below</strong> — the scanner finds differences you cannot profit from.</p><p>Until then, the model rules stay frozen.</p>')}</section>`;
 }
+// FORWARD TESTS — written down Nov 7 2026, before any qualifying data existed.
+// Only picks first seen after FORWARD_START count. Each is judged at 100 picks
+// on the fair-close test: above +1pp = worth small real stakes; otherwise drop.
+const FORWARD_START = '2026-11-07T16:00:00Z';
+const FORWARD_TARGET = 100;
+const leadHours = p => (Date.parse(p.commenceTime) - Date.parse(p.detectedAt || p.commenceTime)) / 36e5;
+const FORWARD_TESTS = [
+  { id: 'all', label: 'Every pick (baseline)', test: () => true },
+  { id: 'narrow', label: 'Small gap (1–1.25pp), found under 24h before start', primary: true,
+    test: p => p.edgeProb <= 0.0125 && leadHours(p) < 24 },
+  { id: 'betrivers', label: 'BetRivers only', test: p => p.book === 'BetRivers' },
+  { id: 'steam', label: 'Pinnacle had just moved toward the pick', primary: true, test: p => isSteam(p) },
+  { id: 'nosteam', label: 'Pinnacle had not moved toward it (comparison)', test: p => pinMove(p) != null && !isSteam(p) }
+];
+function forwardTestPanel() {
+  const base = fairCloseRows().filter(r => (r.p.detectedAt || '') >= FORWARD_START);
+  const r1 = x => (x >= 0 ? '+' : '') + (x * 100).toFixed(1) + 'pp';
+  const rows = FORWARD_TESTS.map(t => {
+    const rs = base.filter(r => t.test(r.p)), n = rs.length;
+    const mean = n ? rs.reduce((a, r) => a + r.v, 0) / n : null;
+    const se = rowsClusterSE(rs);
+    let status = n < FORWARD_TARGET ? `${n} / ${FORWARD_TARGET}` : mean >= 0.01 ? 'Pass' : 'Drop';
+    return `<tr><th scope="row">${t.primary ? '<strong>' : ''}${esc(t.label)}${t.primary ? '</strong>' : ''}</th><td class="mono">${status}</td><td class="mono">${mean != null ? r1(mean) : '—'}${se != null ? ` <span class="quiet">± ${(se * 196).toFixed(1)}</span>` : ''}</td><td class="mono">${n ? Math.round(rs.filter(r => r.v > 0).length / n * 100) + '%' : '—'}</td></tr>`;
+  }).join('');
+  return `<section class="panel"><div class="panel-head"><div><h2>Forward tests</h2><p>Ideas from the first 143 picks, now tested only on picks found after Nov 7</p></div></div><table class="calibration-table"><thead><tr><th scope="col">Test</th><th scope="col">Picks</th><th scope="col">Edge at close</th><th scope="col">Beat fair</th></tr></thead><tbody>${rows}</tbody></table><p class="quiet">Bold rows are the two being tested; the others are for comparison. Each is judged at ${FORWARD_TARGET} picks: above +1pp is worth small real stakes, anything less is dropped. Nothing here changes which picks you see.</p>${explain('Why only new picks?','<p>These ideas came from looking at the old picks. Testing them on the same picks would be grading your own homework — some pattern always shows up in hindsight. Only picks found after the rules were written down can confirm one.</p><p>"Pinnacle had just moved" means Pinnacle\'s own fair price shifted toward the pick since the previous scan on this device (at least 5 minutes earlier, at most 3 hours). Picks found by the server scan do not record this, so they appear in neither steam row.</p>')}</section>`;
+}
 function performanceView() {
  const d=recordSummary(),rows=d.closes,x=clvExcludedCounts();const mean=rows.length?rows.reduce((a,p)=>a+cCLV(p.line,p.closingLine),0)/rows.length:null;const se=eventClusterSE(rows,mean);
- return summaryCards()+fairClosePanel()+`<section class="panel"><div class="panel-head"><div><h2>Is this actually working?</h2><p>How far prices moved after you took them — the same book, before and after</p></div></div><div class="detail-grid"><div><small>Average move in your favour</small><strong>${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Bets measured</small><strong>${rows.length}</strong></div><div><small>Not counted</small><strong>${x.total}</strong></div></div>${explain('What counts as evidence here, and what does not?','<p>A bet counts only if the app actually saw the price shortly before kickoff, with a timestamp proving when. Anything else is excluded — including prices recorded before the app tracked where a price came from, and second copies of the same bet taken at another sportsbook.</p><p>None of that removes a bet from your history or changes a win or a loss. It only decides what is allowed to be used as proof.</p>')}<p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by event.`:`No margin of error yet — that needs at least 30 different games measured, and there ${rows.length === 1 ? 'is 1' : 'are ' + rows.length} so far. Treat the average above as a direction, not a result.`}</p><p class="quiet">Not counted: ${x.legacy} recorded before the app tracked where a closing price came from · ${x.fallback} where no price was seen in time · ${x.duplicates} the same bet at a second book. Your results are unaffected.</p><p class="quiet">${sampleNote(rows.length)}</p></section><div class="split"><div>${calibrationTable('Does a bigger gap pay off?',calibrationRows(),'If the rows lower down move more, the gap number is measuring something real. Flat or backwards means it is not — yet.')}${calibrationTable('Is the confidence score worth anything?',confidenceCalibrationRows(),'High confidence should move more than low. It did not, so since Nov 7 the score no longer affects ranking; this table decides whether it earns a way back in.')}</div><div>${calibrationTable('Does the price level matter?',oddsCalibrationRows(),'The maths behind the fair price is most reliable near even money. This checks whether that holds in your own results.')}${calibrationTable('Which sports are working?',sportCalibrationRows(),'The sharp reference book is deepest in the major leagues. If the thinner sports drag the average down, that is a reason to weight or drop them.')}${calibrationTable('Does a stale close still count for anything?',closeAgeRows(),'How long before kickoff the book last moved the price that became your close. If the older rows hold up, a tight capture window was throwing away good evidence. If they fall away, this table says where the real cutoff belongs.')}</div></div><p class="section-note">Every table above needs a few hundred measured bets before it reads clearly. Older records stay saved but some cannot be used in these tables, because the app could not prove their entry figures were never edited. The profit figure assumes a flat $10 a bet and is not your sportsbook balance.</p>`;
+ return summaryCards()+fairClosePanel()+forwardTestPanel()+`<section class="panel"><div class="panel-head"><div><h2>Is this actually working?</h2><p>How far prices moved after you took them — the same book, before and after</p></div></div><div class="detail-grid"><div><small>Average move in your favour</small><strong>${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Bets measured</small><strong>${rows.length}</strong></div><div><small>Not counted</small><strong>${x.total}</strong></div></div>${explain('What counts as evidence here, and what does not?','<p>A bet counts only if the app actually saw the price shortly before kickoff, with a timestamp proving when. Anything else is excluded — including prices recorded before the app tracked where a price came from, and second copies of the same bet taken at another sportsbook.</p><p>None of that removes a bet from your history or changes a win or a loss. It only decides what is allowed to be used as proof.</p>')}<p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by event.`:`No margin of error yet — that needs at least 30 different games measured, and there ${rows.length === 1 ? 'is 1' : 'are ' + rows.length} so far. Treat the average above as a direction, not a result.`}</p><p class="quiet">Not counted: ${x.legacy} recorded before the app tracked where a closing price came from · ${x.fallback} where no price was seen in time · ${x.duplicates} the same bet at a second book. Your results are unaffected.</p><p class="quiet">${sampleNote(rows.length)}</p></section><div class="split"><div>${calibrationTable('Does a bigger gap pay off?',calibrationRows(),'If the rows lower down move more, the gap number is measuring something real. Flat or backwards means it is not — yet.')}${calibrationTable('Is the confidence score worth anything?',confidenceCalibrationRows(),'High confidence should move more than low. It did not, so since Nov 7 the score no longer affects ranking; this table decides whether it earns a way back in.')}</div><div>${calibrationTable('Does the price level matter?',oddsCalibrationRows(),'The maths behind the fair price is most reliable near even money. This checks whether that holds in your own results.')}${calibrationTable('Which sports are working?',sportCalibrationRows(),'The sharp reference book is deepest in the major leagues. If the thinner sports drag the average down, that is a reason to weight or drop them.')}${calibrationTable('Does a stale close still count for anything?',closeAgeRows(),'How long before kickoff the book last moved the price that became your close. If the older rows hold up, a tight capture window was throwing away good evidence. If they fall away, this table says where the real cutoff belongs.')}</div></div><p class="section-note">Every table above needs a few hundred measured bets before it reads clearly. Older records stay saved but some cannot be used in these tables, because the app could not prove their entry figures were never edited. The profit figure assumes a flat $10 a bet and is not your sportsbook balance.</p>`;
 }
 function aiView() {
  const batches=layerBatches(),eligible=studyBatches();
@@ -2676,11 +2744,119 @@ Object.assign(window.EL,{
  openWorkspaceSettings(){this.navigate('settings');},openTracker(){this.navigate('tracker');},
  updateNumber(key,raw){const value=Number(raw);const bounds={minEdge:[.5,5],topN:[1,20],maxOddsCap:[200,3000]}[key];if(!bounds||!Number.isFinite(value)||value<bounds[0]||value>bounds[1]||(key==='topN'&&!Number.isInteger(value))){st.err='Enter a value within the displayed range.';render();return;}st.err='';this.saveSetting(key,key==='minEdge'?value/100:value);}
 });
-function routeView(page) {return ({scanner:scannerView,detail:detailView,tracker:trackerView,performance:performanceView,ai:aiView,settings:settingsView}[page]||todayView)();}
+function routeView(page) {return ({boosts:boostView,scanner:scannerView,detail:detailView,tracker:trackerView,performance:performanceView,ai:aiView,settings:settingsView}[page]||todayView)();}
 
 function calibrationTable(title,rows,description) {
  return `<section class="panel"><h2>${esc(title)}</h2><p class="quiet">${esc(description)}</p>${rows.length?`<table class="calibration-table"><thead><tr><th scope="col">Group</th><th scope="col">Bets</th><th scope="col">Avg. move</th></tr></thead><tbody>${rows.map(r=>`<tr><th scope="row">${esc(r.label)}</th><td>${r.n}</td><td>${r.avgClv==null?'—':fCLV(r.avgClv)}</td></tr>`).join('')}</tbody></table>`:'<p class="quiet">Nothing measured yet. This fills in as closing prices are captured.</p>'}</section>`;
 }
+
+/* ------------------------------------------------------------ BOOST CHECKER
+   Sportsbook promotions are where most retail +EV lives. This page prices a
+   boost against the fair probability: Pinnacle's margin-free price from a live
+   pull, or a two-sided price you type in (for props and markets not covered).
+   Same-game parlays are out of scope: their legs are correlated, so no simple
+   fair price exists. */
+const BOOST_SPORTS = [['americanfootball_nfl','NFL'],['americanfootball_ncaaf','NCAAF'],['basketball_nba','NBA'],['basketball_ncaab','NCAAB'],['icehockey_nhl','NHL'],['baseball_mlb','MLB'],['basketball_wnba','WNBA'],['soccer_epl','EPL'],['soccer_usa_mls','MLS']];
+const boost = { mode: 'market', sport: 'americanfootball_nfl', games: null, loading: false, err: '', gameId: '', sel: null, type: 'odds', result: null };
+const decOf = o => o > 0 ? 1 + o / 100 : 1 + 100 / Math.abs(o);
+function parseAmerican(v) { const n = Number(String(v || '').replace(/[^\d.+-]/g, '')); return validOdds(n) ? n : null; }
+function boostSelections(g) {
+  const pin = g?.bookmakers?.find(b => b.key === 'pinnacle');
+  const out = [];
+  for (const m of pin?.markets || []) {
+    if (!m.outcomes?.length) continue;
+    const groups = m.key === 'h2h' ? [m.outcomes] : (() => { const by = {}; m.outcomes.forEach(o => (by[Math.abs(o.point)] ||= []).push(o)); return Object.values(by).filter(x => x.length === 2); })();
+    for (const grp of groups) {
+      const fair = shinFairN(grp.map(o => o.price));
+      grp.forEach((o, i) => out.push({ mkt: m.key, name: o.name, point: o.point ?? null, price: o.price, fair: fair[i] }));
+    }
+  }
+  return out;
+}
+function boostLabel(x) {
+  const mk = { h2h: 'Moneyline', spreads: 'Spread', totals: 'Total' }[x.mkt];
+  return `${x.name}${x.point != null ? ` ${x.point > 0 && x.mkt !== 'totals' ? '+' : ''}${x.point}` : ''} · ${mk}`;
+}
+function boostFairProb(f) {
+  if (boost.mode === 'market') return boost.sel ? boost.sel.fair : null;
+  const fp = Number(f.get('fairpct'));
+  if (fp > 0 && fp < 100) return fp / 100;
+  const a = parseAmerican(f.get('sideA')), b = parseAmerican(f.get('sideB'));
+  return a != null && b != null ? shinFairN([a, b])[0] : null;
+}
+function boostCompute(f) {
+  const p = boostFairProb(f);
+  if (p == null) return { err: boost.mode === 'market' ? 'Pick a selection first.' : 'Enter the regular price on both sides, or a fair win chance.' };
+  const stake = Number(f.get('stake')) || null;
+  let dec, label;
+  if (boost.type === 'odds') {
+    const o = parseAmerican(f.get('boosted')); if (o == null) return { err: 'Enter the boosted price, e.g. +150.' };
+    dec = decOf(o); label = `Boosted price ${fO(o)}`;
+  } else if (boost.type === 'profit') {
+    const o = parseAmerican(f.get('base')), pct = Number(f.get('pct'));
+    if (o == null || !(pct > 0)) return { err: 'Enter the regular price and the boost percentage.' };
+    dec = 1 + (decOf(o) - 1) * (1 + pct / 100); label = `${fO(o)} with a ${pct}% profit boost = ${fO(tA(dec))}`;
+  } else {
+    const o = parseAmerican(f.get('bonusprice')); if (o == null) return { err: 'Enter the price you would use the bonus bet on.' };
+    // A bonus bet returns winnings only, never the stake.
+    const value = p * (decOf(o) - 1);
+    return { p, bonus: true, value, label: `Bonus bet at ${fO(o)}`, stake, o };
+  }
+  const ev = p * dec - 1;
+  return { p, dec, ev, label, stake, kelly: st.bankroll ? kellyStake(p, tA(dec), st.bankroll) : null };
+}
+function boostResultHtml(r) {
+  if (!r) return '';
+  if (r.err) return `<div class="notice">${esc(r.err)}</div>`;
+  const pct = x => (100 * x).toFixed(1) + '%';
+  if (r.bonus) {
+    const verdict = r.value >= 0.7 ? 'Good use of the bonus' : r.value >= 0.55 ? 'Reasonable' : 'Weak use — a longer price usually converts better';
+    return `${r.value > 0.95 ? '<div class="notice">That converts almost the whole bonus to cash, which almost never happens. Check that the price and the fair win chance are for the same bet.</div>' : ''}<section class="panel" style="border-left:3px solid var(--accent)"><h2>${verdict}</h2><div class="detail-grid"><div><small>Fair win chance</small><strong>${pct(r.p)}</strong></div><div><small>Expected cash per $100 bonus</small><strong class="positive">$${(100 * r.value).toFixed(0)}</strong></div><div><small>Conversion rate</small><strong>${pct(r.value)}</strong></div></div><p class="quiet">${esc(r.label)}. A bonus bet pays winnings only, so the stake never comes back. Longer prices usually convert more of it into cash; 70% or more is good.${r.stake ? ` On a $${r.stake} bonus: about $${(r.stake * r.value).toFixed(2)} expected.` : ''}</p></section>`;
+  }
+  const verdict = r.ev >= 0.02 ? 'Worth taking' : r.ev >= 0 ? 'Marginal' : 'Skip — still worse than fair';
+  return `${r.ev > 0.25 ? '<div class="notice">An expected return above 25% is rare even for boosts. Check that the boosted price and the fair price are for the same bet and the same line.</div>' : ''}<section class="panel" style="border-left:3px solid ${r.ev >= 0.02 ? 'var(--accent)' : r.ev >= 0 ? '#c9a227' : '#a73e32'}"><h2>${verdict}</h2><div class="detail-grid"><div><small>Fair win chance</small><strong>${pct(r.p)}</strong></div><div><small>Fair price</small><strong>${fO(tA(1 / r.p))}</strong></div><div><small>Expected return</small><strong class="${r.ev >= 0 ? 'positive' : 'negative'}">${fE(r.ev)}</strong></div></div><p class="quiet">${esc(r.label)}. Expected return is profit per dollar staked over the long run, against the fair price.${r.stake ? ` At the $${r.stake} maximum: about $${(r.stake * r.ev).toFixed(2)} expected.` : ''}${r.kelly != null && r.ev > 0 ? ` Quarter-Kelly on your $${st.bankroll} bankroll: $${r.kelly.toFixed(2)}${r.stake && r.kelly > r.stake ? ' (capped by the boost maximum)' : ''}.` : ''}</p></section>`;
+}
+function boostView() {
+  const pills = (key, items) => `<div class="pillbar">${items.map(([k, v]) => `<button aria-pressed="${boost[key] === k}" onclick="EL.boostSet('${key}','${k}')">${esc(v)}</button>`).join('')}</div>`;
+  let source;
+  if (boost.mode === 'market') {
+    const games = boost.games || [];
+    const g = games.find(x => x.id === boost.gameId);
+    const sels = g ? boostSelections(g) : [];
+    source = `<div class="tools"><label class="field">Sport<select onchange="EL.boostSet('sport',this.value)">${BOOST_SPORTS.map(([k, v]) => `<option value="${k}" ${boost.sport === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label><div class="field" style="justify-content:flex-end"><button class="button" onclick="EL.boostLoad()" ${boost.loading || !AK ? 'disabled' : ''}>${boost.loading ? 'Loading…' : boost.games ? 'Refresh Pinnacle prices' : 'Load Pinnacle prices'}</button></div></div>`
+      + (!AK ? '<p class="quiet">Live prices need your Odds API key (Settings). You can still enter a price yourself.</p>' : '')
+      + (boost.err ? `<div class="notice error">${esc(boost.err)}</div>` : '')
+      + (boost.games ? (games.length ? `<label class="field">Game<select onchange="EL.boostSet('gameId',this.value)"><option value="">Choose a game</option>${games.map(x => `<option value="${attribute(x.id)}" ${x.id === boost.gameId ? 'selected' : ''}>${esc(x.away_team)} @ ${esc(x.home_team)} · ${esc(fDT(x.commence_time))}</option>`).join('')}</select></label>` : '<p class="quiet">Pinnacle has no prices for this sport right now.</p>') : '')
+      + (g ? `<div style="margin-top:14px">${sels.length ? sels.map((x, i) => `<button class="button" style="margin:0 8px 8px 0;${boost.sel && boostLabel(boost.sel) === boostLabel(x) ? 'background:#143c32;color:#fff' : ''}" onclick="EL.boostPick(${i})">${esc(boostLabel(x))} <span class="quiet" style="color:inherit">${(100 * x.fair).toFixed(1)}%</span></button>`).join('') : '<p class="quiet">No Pinnacle markets for this game yet.</p>'}</div>` : '');
+  } else {
+    source = `<div class="form-grid"><label class="field">Regular price, this side<input name="sideA" inputmode="text" placeholder="-115"></label><label class="field">Regular price, other side<input name="sideB" inputmode="text" placeholder="-105"></label><label class="field full">…or the fair win chance, if you know it (%)<input name="fairpct" inputmode="decimal" placeholder="e.g. 52"></label></div><p class="quiet">Use the unboosted market for the same bet, ideally from a sharp book. The margin is removed for you.</p>`;
+  }
+  const typeFields = boost.type === 'odds'
+    ? `<label class="field">Boosted price<input name="boosted" placeholder="+150"></label>`
+    : boost.type === 'profit'
+    ? `<label class="field">Regular price you'd get<input name="base" placeholder="+120"></label><label class="field">Profit boost (%)<input name="pct" inputmode="decimal" placeholder="50"></label>`
+    : `<label class="field">Price you'd use it on<input name="bonusprice" placeholder="+300"></label>`;
+  return `<section class="panel"><div class="panel-head"><div><h2>Is this boost actually good?</h2><p>Price a sportsbook promotion against the fair odds</p></div></div>${explain('Why boosts?','<p>The regular market at a sportsbook is priced to win a few percent from you. A boost or bonus can flip that, often by more than any price gap the scanner finds — but plenty of boosts are dressed-up bad prices. This checks which is which.</p><p>Not for same-game parlays: their legs are linked, so there is no simple fair price.</p>')}<h3 style="margin-top:18px">1. What the bet is really worth</h3>${pills('mode', [['market', 'From Pinnacle'], ['manual', 'Enter it myself']])}${boost.mode === 'market' ? source : ''}<form onsubmit="event.preventDefault();EL.boostCheck(this)">${boost.mode === 'manual' ? source : ''}<h3 style="margin-top:22px">2. The promotion</h3>${pills('type', [['odds', 'Boosted odds'], ['profit', 'Profit boost %'], ['bonus', 'Bonus bet']])}<div class="form-grid">${typeFields}<label class="field">Maximum stake, if any ($)<input name="stake" inputmode="decimal" placeholder="25"></label></div><div style="margin-top:16px"><button class="button primary" type="submit">Check it</button></div></form></section>${boostResultHtml(boost.result)}`;
+}
+Object.assign(EL, {
+  boostSet(key, v) { boost[key] = v; if (key === 'sport') { boost.games = null; boost.gameId = ''; boost.sel = null; } if (key === 'gameId') boost.sel = null; if (key === 'mode' || key === 'type') boost.result = null; render(); },
+  async boostLoad() {
+    if (!AK) return;
+    boost.loading = true; boost.err = ''; render();
+    try {
+      const url = new URL(`${OB}/sports/${boost.sport}/odds/`);
+      url.searchParams.set('apiKey', AK); url.searchParams.set('regions', 'eu');
+      url.searchParams.set('markets', 'h2h,spreads,totals'); url.searchParams.set('oddsFormat', 'american');
+      url.searchParams.set('bookmakers', 'pinnacle');
+      const r = await fetch(url.toString());
+      if (!r.ok) throw new Error(`Odds API error ${r.status}`);
+      boost.games = (await r.json()).filter(g => Date.parse(g.commence_time) > Date.now()).sort((a, b) => Date.parse(a.commence_time) - Date.parse(b.commence_time));
+    } catch (e) { boost.err = e.message; }
+    boost.loading = false; render();
+  },
+  boostPick(i) { const g = (boost.games || []).find(x => x.id === boost.gameId); boost.sel = boostSelections(g)[i] || null; boost.result = null; render(); },
+  boostCheck(form) { boost.result = boostCompute(new FormData(form)); render(); }
+});
 
 init();
 setInterval(() => { if (document.visibilityState === 'visible') maintainCloses(); },60000);
