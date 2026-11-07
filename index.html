@@ -2750,11 +2750,11 @@ function forwardTestPanel() {
     let status = n < FORWARD_TARGET ? `${n} / ${FORWARD_TARGET}` : mean >= 0.01 ? 'Pass' : 'Drop';
     return `<tr><th scope="row">${t.primary ? '<strong>' : ''}${esc(t.label)}${t.primary ? '</strong>' : ''}</th><td class="mono">${status}</td><td class="mono">${mean != null ? r1(mean) : '—'}${se != null ? ` <span class="quiet">± ${(se * 196).toFixed(1)}</span>` : ''}</td><td class="mono">${n ? Math.round(rs.filter(r => r.v > 0).length / n * 100) + '%' : '—'}</td></tr>`;
   }).join('');
-  return `<section class="panel"><div class="panel-head"><div><h2>Forward tests</h2><p>Ideas from the first 143 picks, now tested only on picks found after Nov 7</p></div></div><table class="calibration-table"><thead><tr><th scope="col">Test</th><th scope="col">Picks</th><th scope="col">Edge at close</th><th scope="col">Beat fair</th></tr></thead><tbody>${rows}</tbody></table><p class="quiet">Bold rows are the two being tested; the others are for comparison. Each is judged at ${FORWARD_TARGET} picks: above +1pp is worth small real stakes, anything less is dropped. Nothing here changes which picks you see.</p>${explain('Why only new picks?','<p>These ideas came from looking at the old picks. Testing them on the same picks would be grading your own homework — some pattern always shows up in hindsight. Only picks found after the rules were written down can confirm one.</p><p>"Pinnacle had just moved" means Pinnacle\'s own fair price shifted toward the pick since the previous scan on this device (at least 5 minutes earlier, at most 3 hours). Picks found by the server scan do not record this, so they appear in neither steam row.</p>')}</section>`;
+  return `<section class="panel"><div class="panel-head"><div><h2>Forward tests</h2><p>Ideas from the first 143 picks, now tested only on picks found after Nov 7</p></div></div><table class="calibration-table"><thead><tr><th scope="col">Test</th><th scope="col">Picks</th><th scope="col">Edge at close</th><th scope="col">Beat fair</th></tr></thead><tbody>${rows}</tbody></table><p class="quiet">Bold rows are the two being tested; the others are for comparison. Each is judged at ${FORWARD_TARGET} picks: above +1pp is worth small real stakes, anything less is dropped. Nothing here changes which picks you see. These rules were fixed on Nov 7, 2026 in public commit <a href="https://github.com/Bradpeds/Embet-Brad-/commit/386bf4e" target="_blank" rel="noopener">386bf4e</a>; changes go in as new, dated tests, never edits to these.</p><button class="button" onclick="EL.exportResearch()">Download research data (CSV)</button>${explain('Why only new picks?','<p>These ideas came from looking at the old picks. Testing them on the same picks would be grading your own homework — some pattern always shows up in hindsight. Only picks found after the rules were written down can confirm one.</p><p>"Pinnacle had just moved" means Pinnacle\'s own fair price shifted toward the pick since the previous scan on this device (at least 5 minutes earlier, at most 3 hours). Picks found by the server scan do not record this, so they appear in neither steam row.</p>')}</section>`;
 }
 function performanceView() {
  const d=recordSummary(),rows=d.closes,x=clvExcludedCounts();const mean=rows.length?rows.reduce((a,p)=>a+cCLV(p.line,p.closingLine),0)/rows.length:null;const se=eventClusterSE(rows,mean);
- return summaryCards()+fairClosePanel()+forwardTestPanel()+`<section class="panel"><div class="panel-head"><div><h2>Is this actually working?</h2><p>How far prices moved after you took them — the same book, before and after</p></div></div><div class="detail-grid"><div><small>Average move in your favour</small><strong>${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Bets measured</small><strong>${rows.length}</strong></div><div><small>Not counted</small><strong>${x.total}</strong></div></div>${explain('What counts as evidence here, and what does not?','<p>A bet counts only if the app actually saw the price shortly before kickoff, with a timestamp proving when. Anything else is excluded — including prices recorded before the app tracked where a price came from, and second copies of the same bet taken at another sportsbook.</p><p>None of that removes a bet from your history or changes a win or a loss. It only decides what is allowed to be used as proof.</p>')}<p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by event.`:`No margin of error yet — that needs at least 30 different games measured, and there ${rows.length === 1 ? 'is 1' : 'are ' + rows.length} so far. Treat the average above as a direction, not a result.`}</p><p class="quiet">Not counted: ${x.legacy} recorded before the app tracked where a closing price came from · ${x.fallback} where no price was seen in time · ${x.duplicates} the same bet at a second book. Your results are unaffected.</p><p class="quiet">${sampleNote(rows.length)}</p></section><div class="split"><div>${calibrationTable('Does a bigger gap pay off?',calibrationRows(),'If the rows lower down move more, the gap number is measuring something real. Flat or backwards means it is not — yet.')}${calibrationTable('Is the confidence score worth anything?',confidenceCalibrationRows(),'High confidence should move more than low. It did not, so since Nov 7 the score no longer affects ranking; this table decides whether it earns a way back in.')}</div><div>${calibrationTable('Does the price level matter?',oddsCalibrationRows(),'The maths behind the fair price is most reliable near even money. This checks whether that holds in your own results.')}${calibrationTable('Which sports are working?',sportCalibrationRows(),'The sharp reference book is deepest in the major leagues. If the thinner sports drag the average down, that is a reason to weight or drop them.')}${calibrationTable('Does a stale close still count for anything?',closeAgeRows(),'How long before kickoff the book last moved the price that became your close. If the older rows hold up, a tight capture window was throwing away good evidence. If they fall away, this table says where the real cutoff belongs.')}</div></div><p class="section-note">Every table above needs a few hundred measured bets before it reads clearly. Older records stay saved but some cannot be used in these tables, because the app could not prove their entry figures were never edited. The profit figure assumes a flat $10 a bet and is not your sportsbook balance.</p>`;
+ return summaryCards()+fairClosePanel()+gapClosurePanel()+forwardTestPanel()+`<section class="panel"><div class="panel-head"><div><h2>Is this actually working?</h2><p>How far prices moved after you took them — the same book, before and after</p></div></div><div class="detail-grid"><div><small>Average move in your favour</small><strong>${mean!=null?fCLV(mean):'—'}</strong></div><div><small>Bets measured</small><strong>${rows.length}</strong></div><div><small>Not counted</small><strong>${x.total}</strong></div></div>${explain('What counts as evidence here, and what does not?','<p>A bet counts only if the app actually saw the price shortly before kickoff, with a timestamp proving when. Anything else is excluded — including prices recorded before the app tracked where a price came from, and second copies of the same bet taken at another sportsbook.</p><p>None of that removes a bet from your history or changes a win or a loss. It only decides what is allowed to be used as proof.</p>')}<p class="quiet">${se!=null?`Approximate 95% interval: ${fCLV(mean)} ± ${(se*1.96*100).toFixed(1)}pp, grouped by event.`:`No margin of error yet — that needs at least 30 different games measured, and there ${rows.length === 1 ? 'is 1' : 'are ' + rows.length} so far. Treat the average above as a direction, not a result.`}</p><p class="quiet">Not counted: ${x.legacy} recorded before the app tracked where a closing price came from · ${x.fallback} where no price was seen in time · ${x.duplicates} the same bet at a second book. Your results are unaffected.</p><p class="quiet">${sampleNote(rows.length)}</p></section><div class="split"><div>${calibrationTable('Does a bigger gap pay off?',calibrationRows(),'If the rows lower down move more, the gap number is measuring something real. Flat or backwards means it is not — yet.')}${calibrationTable('Is the confidence score worth anything?',confidenceCalibrationRows(),'High confidence should move more than low. It did not, so since Nov 7 the score no longer affects ranking; this table decides whether it earns a way back in.')}</div><div>${calibrationTable('Does the price level matter?',oddsCalibrationRows(),'The maths behind the fair price is most reliable near even money. This checks whether that holds in your own results.')}${calibrationTable('Which sports are working?',sportCalibrationRows(),'The sharp reference book is deepest in the major leagues. If the thinner sports drag the average down, that is a reason to weight or drop them.')}${calibrationTable('Does a stale close still count for anything?',closeAgeRows(),'How long before kickoff the book last moved the price that became your close. If the older rows hold up, a tight capture window was throwing away good evidence. If they fall away, this table says where the real cutoff belongs.')}</div></div><p class="section-note">Every table above needs a few hundred measured bets before it reads clearly. Older records stay saved but some cannot be used in these tables, because the app could not prove their entry figures were never edited. The profit figure assumes a flat $10 a bet and is not your sportsbook balance.</p>`;
 }
 function aiView() {
  const batches=layerBatches(),eligible=studyBatches();
@@ -2879,6 +2879,88 @@ Object.assign(EL, {
   },
   boostPick(i) { const g = (boost.games || []).find(x => x.id === boost.gameId); boost.sel = boostSelections(g)[i] || null; boost.result = null; render(); },
   boostCheck(form) { boost.result = boostCompute(new FormData(form)); render(); }
+});
+
+// WHO CLOSED THE GAP? (Nov 7 2026). For each pick with a Pinnacle reference at
+// entry and both closes captured: how far Pinnacle's fair price moved toward
+// the soft book's price, and how far the soft book's price moved toward
+// Pinnacle. When the soft book does the moving it was stale and the pick was
+// real; when Pinnacle does, Pinnacle was off and the "edge" disappears.
+function gapClosureRows() {
+  const byKey = new Map();
+  for (const p of [...st.pending, ...st.history]) {
+    if (!p.sharp || !Number.isFinite(p.fairProb) || p.closeSource !== 'captured' || !validOdds(p.closingLine) || typeof p.line !== 'number') continue;
+    if (p.entrySchema != null && p.entrySchema < 4) continue;
+    const f = fairCloseFor(p);
+    if (!f || f.status !== 'ok' || f.source === 'line-moved') continue;
+    const k = clvKey(p), prev = byKey.get(k);
+    if (!prev || iP(p.line) < iP(prev.p.line)) byKey.set(k, { p, f });
+  }
+  return [...byKey.values()].map(({ p, f }) => ({ p,
+    gap: p.fairProb - iP(p.line),
+    pin: p.fairProb - f.pinFair,            // + = Pinnacle moved toward the soft price
+    soft: iP(p.closingLine) - iP(p.line),   // + = soft book moved toward Pinnacle
+    edge: f.pinFair - iP(p.line) }));
+}
+function gapClosurePanel() {
+  const rows = gapClosureRows();
+  const r1 = x => (x >= 0 ? '+' : '') + (x * 100).toFixed(1);
+  const line = (label, rs) => {
+    if (!rs.length) return '';
+    const m = k => rs.reduce((a, x) => a + x[k], 0) / rs.length;
+    const pin = m('pin'), soft = m('soft'), tot = pin + soft;
+    const share = tot > 0.001 ? Math.round(pin / tot * 100) + '%' : '—';
+    return `<tr><th scope="row">${esc(label)}</th><td class="mono">${rs.length}</td><td class="mono">${r1(m('gap'))}</td><td class="mono">${r1(pin)}</td><td class="mono">${r1(soft)}</td><td class="mono"><strong>${share}</strong></td><td class="mono ${m('edge') >= 0 ? 'positive' : 'negative'}">${r1(m('edge'))}</td></tr>`;
+  };
+  const groups = (f, order) => { const g = {}; rows.forEach(x => { const k = f(x.p); if (k) (g[k] ||= []).push(x); }); return (order || Object.keys(g).sort()).filter(k => g[k]).map(k => line(k, g[k])).join(''); };
+  const lead = p => { const h = (Date.parse(p.commenceTime) - Date.parse(p.detectedAt || p.commenceTime)) / 36e5; return h < 6 ? 'Found under 6h before start' : h < 24 ? 'Found 6–24h before' : 'Found 24h+ before'; };
+  const gapB = p => p.edgeProb <= 0.0125 ? 'Gap up to 1.25pp' : p.edgeProb <= 0.02 ? 'Gap 1.25–2pp' : 'Gap over 2pp';
+  const sep = t => `<tr><th colspan="7" style="padding-top:14px;font-weight:500;color:var(--text2)">${t}</th></tr>`;
+  const body = rows.length ? line('All picks', rows) + sep('By gap size') + groups(gapB, ['Gap up to 1.25pp', 'Gap 1.25–2pp', 'Gap over 2pp']) + sep('By when it was found') + groups(lead, ['Found under 6h before start', 'Found 6–24h before', 'Found 24h+ before']) + sep('By sportsbook') + groups(p => p.book) : '';
+  return `<section class="panel"><div class="panel-head"><div><h2>Who closed the gap?</h2><p>After you took the price, did Pinnacle move to meet the sportsbook, or the sportsbook to meet Pinnacle?</p></div></div>${rows.length ? `<div style="overflow-x:auto"><table class="calibration-table"><thead><tr><th scope="col">Group</th><th scope="col">Picks</th><th scope="col">Gap at entry</th><th scope="col">Pinnacle moved</th><th scope="col">Book moved</th><th scope="col">Pinnacle's share</th><th scope="col">Edge at close</th></tr></thead><tbody>${body}</tbody></table></div>` : '<p class="quiet">Needs picks with a Pinnacle reference and both closing prices captured.</p>'}<p class="quiet">All figures in percentage points of win chance. A low Pinnacle share means the sportsbook was slow and caught up, which is the edge this app is looking for. A high share means Pinnacle was the one that was off.</p>${explain('How is this worked out?','<p>"Pinnacle moved" is how far Pinnacle\'s margin-free price shifted toward the sportsbook\'s price between your pick and kickoff. "Book moved" is how far the sportsbook\'s own price shifted toward Pinnacle\'s. Pinnacle\'s share is its part of the total. "Edge at close" is the fair-close test from the panel above.</p><p>Only picks with both closing prices count, one per bet at the best price. The book\'s price still includes its cut, so this compares directions and proportions, not exact fair values.</p>')}</section>`;
+}
+
+// RESEARCH EXPORT (Nov 7 2026): every tracked pick with its entry, closes,
+// Pinnacle prices and result, as CSV, so the data can be shared or analysed
+// elsewhere without rebuilding anything.
+function researchExportRows() {
+  const seen = new Set();
+  const all = [...st.pending, ...st.history].filter(p => p && !p.deleted && !seen.has(p.id) && seen.add(p.id))
+    .sort((a, b) => String(a.commenceTime).localeCompare(String(b.commenceTime)));
+  return all.map(p => {
+    const f = fairCloseFor(p), pin = p.closeEvidence?.pin || p.preClose?.pin, pm = pinMove(p);
+    return {
+      id: p.id, sport: p.sport, game: p.game, commence_time: p.commenceTime, detected_at: p.detectedAt || '',
+      market: p.mkt, bet: p.bet, book: p.book, entry_price: p.line, entry_implied: iP(p.line),
+      fair_prob_at_entry: p.fairProb, gap_pp: p.edgeProb ?? p.edge, reference: p.sharp ? 'pinnacle' : 'consensus',
+      consensus_fair: p.confMeta?.consProb ?? '', pin_prev_fair: p.confMeta?.pinPrev ?? '', pin_prev_at: p.confMeta?.pinPrevAt ?? '',
+      pinnacle_moved_before_pick: pm ? pm.move : '', steam: isSteam(p) ? 1 : 0,
+      close_source: p.closeSource || '', close_method: p.closeEvidence?.method || '', close_price: p.closingLine ?? '',
+      close_age_ms: p.closeEvidence?.ageMs ?? '', pin_close_price: pin?.price ?? '', pin_close_other: Array.isArray(pin?.others) ? pin.others.join('/') : '',
+      pin_close_fair: f && f.status === 'ok' ? f.pinFair : '', edge_at_fair_close: f && f.status === 'ok' ? f.pinFair - iP(p.line) : '',
+      book_moved_to: p.closeEvidence?.bookMoved?.point ?? '', entry_schema: p.entrySchema ?? '',
+      result: p.gradedResult || '', your_result: p.result || '', placed: p.placed === true ? 1 : p.placed === false ? 0 : ''
+    };
+  });
+}
+function researchCsv() {
+  const rows = researchExportRows();
+  if (!rows.length) return '';
+  const cols = Object.keys(rows[0]);
+  const cell = v => { const s = typeof v === 'number' ? String(Math.round(v * 1e6) / 1e6) : String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  return [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\n');
+}
+Object.assign(EL, {
+  exportResearch() {
+    const csv = researchCsv();
+    if (!csv) { window.alert('No records to export yet.'); return; }
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `embet-research-${today()}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
 });
 
 init();
